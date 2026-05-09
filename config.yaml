@@ -1,0 +1,43 @@
+# TradingMonitor V2 — 配置
+
+# --- 数据源 ---
+top_n: 100
+timeframes: [15m, 1h, 4h]
+
+# --- 扫描 ---
+scan_interval: 120
+
+# --- 指标参数 (按timeframe区分) ---
+indicators:
+  15m: { roc_period: 5, rsi_period: 14, adx_period: 14, bb_period: 20, bb_std: 2, atr_period: 14, volume_ma_period: 20, ma_short: 5, ma_mid: 20, ma_long: 60 }
+  1h:  { roc_period: 10, rsi_period: 14, adx_period: 14, bb_period: 20, bb_std: 2, atr_period: 14, volume_ma_period: 20, ma_short: 5, ma_mid: 20, ma_long: 60 }
+  4h:  { roc_period: 20, rsi_period: 14, adx_period: 14, bb_period: 20, bb_std: 2, atr_period: 14, volume_ma_period: 20, ma_short: 5, ma_mid: 20, ma_long: 60 }
+
+# --- 告警 ---
+alert:
+  dedup_minutes: 30
+  min_confidence: 0.65
+
+# --- 历史数据 ---
+history:
+  lookback_days: [90, 180, 365]
+  db_path: data/history.db
+
+# --- 持仓监控 ---
+position:
+  interval_seconds: 60
+  pnl_loss_pct: 5.0
+  pnl_profit_pct: 10.0
+  max_hours: 4
+  auto_exit: true
+  initial_sl_pct: 3.0
+
+# --- 健康检查 ---
+health:
+  enabled: true
+  port: 8080
+
+# --- 日志 ---
+logging:
+  level: INFO
+  file: logs/main.log
