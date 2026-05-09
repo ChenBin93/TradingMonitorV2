@@ -12,6 +12,7 @@ class SignalState:
     bbw_rank: float | None = None
     regime: str = "unknown"
     direction: str = "neutral"
+    params: dict = field(default_factory=dict)
 
 
 @dataclass
