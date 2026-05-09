@@ -65,14 +65,20 @@ class Alert:
     def tag(self) -> str:
         tags = {"bb_squeeze": "BB", "rsi_extreme": "RSI", "ma_converge": "MA",
                 "macd_cross": "MACD", "volume_spike": "VOL", "ttm_squeeze": "TTM",
-                "rsi_divergence": "RSI背", "macd_divergence": "MACD背", "volume_breakout": "突破"}
+                "rsi_divergence": "RSI背", "macd_divergence": "MACD背",
+                "ma_alignment": "MA排", "adx_surge": "ADX",
+                "atr_expansion": "ATR", "compression_combo": "压",
+                "price_extreme": "极"}
         return tags.get(self.signal_type, self.signal_type[:4])
 
     @property
     def name(self) -> str:
         names = {"bb_squeeze": "BB压缩", "rsi_extreme": "RSI极值", "ma_converge": "MA汇聚",
-                 "macd_cross": "MACD交叉", "volume_spike": "量能爆发", "ttm_squeeze": "TTM压缩",
-                 "rsi_divergence": "RSI背离", "macd_divergence": "MACD背离", "volume_breakout": "量价突破"}
+                 "macd_cross": "MACD交叉", "volume_spike": "放量", "ttm_squeeze": "TTM压缩",
+                 "rsi_divergence": "RSI背离", "macd_divergence": "MACD背离",
+                 "ma_alignment": "均线排列", "adx_surge": "ADX突破",
+                 "atr_expansion": "波动爆发", "compression_combo": "多重压缩",
+                 "price_extreme": "价格极值"}
         return names.get(self.signal_type, self.signal_type)
 
 
@@ -103,30 +109,42 @@ class AlertFilter:
 
         elif a.signal_type == "rsi_extreme":
             rsi = ind.get("rsi", 50)
-            if rsi <= 25 or rsi >= 75: conf += 0.05
+            if rsi <= 20 or rsi >= 80: conf += 0.08
 
         elif a.signal_type == "volume_spike":
             vr = d.get("volume_ratio", 1)
-            if vr >= 5: conf += 0.08
+            if vr >= 5: conf += 0.10
 
         elif a.signal_type == "ma_converge":
             mc = d.get("ma_converge", 1)
-            if mc <= 0.2: conf += 0.07
+            if mc <= 0.2: conf += 0.08
 
         elif a.signal_type == "ttm_squeeze":
             if d.get("is_fired"): conf += 0.15
-            elif d.get("squeeze_bars", 0) >= 8: conf += 0.12
+            elif d.get("squeeze_bars", 0) >= 8: conf += 0.10
+
+        elif a.signal_type == "compression_combo":
+            hits = d.get("combo_signals", [])
+            if len(hits) >= 3: conf += 0.10
+            elif len(hits) >= 2: conf += 0.05
+
+        elif a.signal_type == "ma_alignment":
+            spread = abs(ind.get("close", 0) - (ind.get("ma60") or 0)) / (ind.get("ma60") or 1) * 100
+            if spread > 8: conf += 0.08
+
+        elif a.signal_type == "adx_surge":
+            adx = ind.get("adx", 0)
+            if adx >= 35: conf += 0.08
+
+        elif a.signal_type == "atr_expansion":
+            if d.get("direction") != "neutral":
+                conf += 0.05
 
         elif a.signal_type == "rsi_divergence":
-            if d.get("price_distance_pct", 0) >= 5: conf += 0.15
-
-        elif a.signal_type == "macd_divergence":
             if d.get("price_distance_pct", 0) >= 5: conf += 0.12
 
-        elif a.signal_type == "volume_breakout":
-            vr = d.get("vol_ratio", 0)
-            if vr >= 3: conf += 0.12
-            elif vr >= 2: conf += 0.08
+        elif a.signal_type == "macd_divergence":
+            if d.get("price_distance_pct", 0) >= 5: conf += 0.10
 
         return min(conf, 1.0)
 

@@ -1,5 +1,7 @@
 # 信号定义 + 检测函数
+# 加信号：写 check 函数 → 在 SIGNALS 列表加一行 → 完
 
+import numpy as np
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -10,6 +12,7 @@ class SignalState:
     timeframe: str
     ind: dict          # indicators.compute() 结果
     bbw_rank: float | None = None
+    atr_rank: float | None = None    # ATR 历史分位（需要 history 数据）
     regime: str = "unknown"
     direction: str = "neutral"
     params: dict = field(default_factory=dict)
@@ -24,7 +27,11 @@ class SignalDef:
     tag: str = ""
 
 
-# ---- 检测函数 ----------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════
+# 检测函数
+# ═══════════════════════════════════════════════════════════════════════
+
+# --- 波动收敛 ---
 
 def _check_bb_squeeze(state: SignalState) -> dict | None:
     bb = state.ind.get("bb_width")
@@ -33,25 +40,10 @@ def _check_bb_squeeze(state: SignalState) -> dict | None:
         return None
     threshold = state.params.get("threshold", 25)
     if rank <= threshold:
-        return {
-            "direction": state.direction,
-            "severity": "critical" if rank <= 10 else "high",
-            "confidence": 0.7,
-            "evidence": f"压缩位{rank:.0f}%",
-        }
-
-
-def _check_rsi_extreme(state: SignalState) -> dict | None:
-    rsi = state.ind.get("rsi")
-    if not rsi:
-        return None
-    if rsi <= state.params.get("oversold", 30):
-        return {"direction": "long", "severity": "critical" if rsi <= 25 else "high",
-                "confidence": 0.8, "evidence": f"RSI={rsi:.0f}"}
-    if rsi >= state.params.get("overbot", 70):
-        return {"direction": "short", "severity": "critical" if rsi >= 80 else "high",
-                "confidence": 0.8, "evidence": f"RSI={rsi:.0f}"}
-    return None
+        sev = "critical" if rank <= 10 else "high" if rank <= 20 else "medium"
+        return {"direction": state.direction, "severity": sev,
+                "confidence": 0.75 if rank <= 10 else 0.65,
+                "evidence": f"BB压缩位{rank:.0f}%", "bbw_rank": rank}
 
 
 def _check_ma_converge(state: SignalState) -> dict | None:
@@ -60,29 +52,10 @@ def _check_ma_converge(state: SignalState) -> dict | None:
         return None
     threshold = state.params.get("threshold", 0.5)
     if mc <= threshold:
-        return {"direction": state.direction,
-                "severity": "critical" if mc <= 0.3 else "high",
-                "confidence": 0.6, "evidence": f"汇聚度{mc:.2f}"}
-
-
-def _check_macd_cross(state: SignalState) -> dict | None:
-    cross = state.ind.get("macd_cross")
-    if not cross:
-        return None
-    hist = state.ind.get("macd_hist") or 0
-    return {"direction": "long" if cross == "golden" else "short",
-            "severity": "high", "confidence": 0.7 if abs(hist) > 0.001 else 0.55,
-            "evidence": "金叉" if cross == "golden" else "死叉"}
-
-
-def _check_volume_spike(state: SignalState) -> dict | None:
-    vr = state.ind.get("volume_ratio")
-    threshold = state.params.get("threshold", 3.0)
-    if vr and vr >= threshold:
-        return {"direction": state.direction,
-                "severity": "critical" if vr >= 5 else "high",
-                "confidence": min(0.6 + (vr - 2) * 0.1, 0.9),
-                "evidence": f"量{vr:.1f}x"}
+        sev = "critical" if mc <= 0.2 else "high" if mc <= 0.35 else "medium"
+        return {"direction": state.direction, "severity": sev,
+                "confidence": 0.7 if mc <= 0.2 else 0.55,
+                "evidence": f"MA汇聚{mc:.2f}", "ma_converge": mc}
 
 
 def _check_ttm_squeeze(state: SignalState) -> dict | None:
@@ -91,12 +64,132 @@ def _check_ttm_squeeze(state: SignalState) -> dict | None:
         return None
     bars = ts.get("squeeze_bars", 0)
     fired = ts.get("is_fired", False)
-    if bars >= 3 or fired:
-        return {"direction": ts.get("direction") or state.direction,
-                "severity": "critical" if bars >= 8 or fired else "high",
-                "confidence": 0.75 if fired else 0.65,
-                "evidence": f"压缩{bars}根{'释放' if fired else ''}"}
+    if bars >= state.params.get("min_bars", 5) or fired:
+        sev = "critical" if bars >= 10 or fired else "high" if bars >= 5 else "medium"
+        return {"direction": ts.get("direction") or state.direction, "severity": sev,
+                "confidence": 0.8 if fired else 0.65,
+                "evidence": f"TTM压缩{bars}根{'→释放' if fired else ''}",
+                "squeeze_bars": bars, "is_fired": fired}
 
+
+def _check_compression_combo(state: SignalState) -> dict | None:
+    """多个压缩信号同时触发 → 高度收敛，突破概率极高"""
+    hits = []
+    bb = state.ind.get("bb_width")
+    if bb and state.bbw_rank is not None and state.bbw_rank <= 20:
+        hits.append("BB")
+    mc = state.ind.get("ma_converge")
+    if mc and mc <= 0.4:
+        hits.append("MA")
+    ts = state.ind.get("ttm_squeeze")
+    if ts and (ts.get("squeeze_bars", 0) >= 3 or ts.get("is_fired")):
+        hits.append("TTM")
+    if len(hits) >= 2:
+        return {"direction": state.direction, "severity": "critical",
+                "confidence": 0.85, "evidence": f"多重压缩 {'+'.join(hits)}",
+                "combo_signals": hits}
+
+
+# --- RSI ---
+
+def _check_rsi_extreme(state: SignalState) -> dict | None:
+    rsi = state.ind.get("rsi")
+    if not rsi:
+        return None
+    if rsi <= state.params.get("oversold", 25):
+        sev = "critical" if rsi <= 20 else "high"
+        return {"direction": "long", "severity": sev, "confidence": 0.85,
+                "evidence": f"RSI超卖{rsi:.0f}", "rsi": rsi}
+    if rsi >= state.params.get("overbot", 75):
+        sev = "critical" if rsi >= 80 else "high"
+        return {"direction": "short", "severity": sev, "confidence": 0.85,
+                "evidence": f"RSI超买{rsi:.0f}", "rsi": rsi}
+    return None
+
+
+# --- 趋势确认 ---
+
+def _check_ma_alignment(state: SignalState) -> dict | None:
+    """均线多头/空头排列"""
+    ma5 = state.ind.get("ma5")
+    ma20 = state.ind.get("ma20")
+    ma60 = state.ind.get("ma60")
+    adx = state.ind.get("adx")
+    if not all([ma5, ma20, ma60, adx]):
+        return None
+    if adx < state.params.get("adx_min", 25):
+        return None
+
+    if ma5 > ma20 > ma60:
+        spread = (ma5 - ma60) / ma60 * 100
+        sev = "critical" if spread > 5 else "high"
+        return {"direction": "long", "severity": sev,
+                "confidence": 0.75 if spread > 5 else 0.65,
+                "evidence": f"多头排列 发散{spread:.1f}%"}
+    elif ma5 < ma20 < ma60:
+        spread = (ma60 - ma5) / ma60 * 100
+        sev = "critical" if spread > 5 else "high"
+        return {"direction": "short", "severity": sev,
+                "confidence": 0.75 if spread > 5 else 0.65,
+                "evidence": f"空头排列 发散{spread:.1f}%"}
+
+
+def _check_adx_surge(state: SignalState) -> dict | None:
+    """ADX 从震荡区(<20)突入趋势区(>=25)，最佳入场时机"""
+    adx = state.ind.get("adx")
+    if not adx:
+        return None
+    df = state.ind.get("df")
+    if df is None or len(df) < 5:
+        return None
+    prev_adx_vals = []
+    for i in range(2, min(6, len(df))):
+        # 简单估算前几根的 ADX: 用当前数值递减
+        prev_adx_vals.append(adx - (adx * 0.05 * i))
+
+    was_range = any(v < 20 for v in prev_adx_vals)
+    now_trend = adx >= state.params.get("trend_threshold", 25)
+    if was_range and now_trend:
+        sev = "critical" if adx >= 35 else "high"
+        return {"direction": state.direction, "severity": sev,
+                "confidence": 0.8 if adx >= 35 else 0.7,
+                "evidence": f"ADX突破 ADX={adx:.0f}"}
+
+
+def _check_macd_cross(state: SignalState) -> dict | None:
+    cross = state.ind.get("macd_cross")
+    if not cross:
+        return None
+    hist = state.ind.get("macd_hist") or 0
+    sev = "high" if abs(hist) > 0.005 else "medium"
+    return {"direction": "long" if cross == "golden" else "short",
+            "severity": sev,
+            "confidence": 0.7 if abs(hist) > 0.005 else 0.55,
+            "evidence": "MACD金叉" if cross == "golden" else "MACD死叉"}
+
+
+# --- 成交量 ---
+
+def _check_volume_spike(state: SignalState) -> dict | None:
+    """放量：区分突破 vs 滞涨"""
+    vr = state.ind.get("volume_ratio")
+    if not vr or vr < state.params.get("threshold", 3.0):
+        return None
+    chg = abs(state.ind.get("roc") or 0)
+    if chg < state.params.get("min_price_change", 0.3):
+        # 放量但价格不动 → 警惕
+        return {"direction": "neutral",
+                "severity": "critical" if vr >= 5 else "high" if vr >= 3 else "medium",
+                "confidence": 0.6, "volume_ratio": vr,
+                "evidence": f"放量滞涨 量{vr:.1f}x 涨跌{chg:.1f}%"}
+    # 放量突破
+    sev = "critical" if vr >= 5 else "high" if vr >= 3 else "medium"
+    return {"direction": state.direction, "severity": sev,
+            "confidence": min(0.6 + (vr - 2) * 0.12, 0.9),
+            "evidence": f"放量突破 量{vr:.1f}x 涨跌{chg:.1f}%", "volume_ratio": vr}
+
+
+# --- 背离 ---
 
 def _check_rsi_divergence(state: SignalState) -> dict | None:
     rd = state.ind.get("rsi_divergence")
@@ -104,9 +197,10 @@ def _check_rsi_divergence(state: SignalState) -> dict | None:
         return None
     div = rd["divergence"]
     dist = rd.get("price_distance_pct", 0)
+    sev = "critical" if dist >= 5 else "high" if dist >= 3 else "medium"
     return {"direction": "long" if div == "bullish" else "short",
-            "severity": "critical" if dist >= 5 else "high",
-            "confidence": 0.8,
+            "severity": sev, "confidence": 0.8 if dist >= 5 else 0.7,
+            "price_distance_pct": dist,
             "evidence": f"{'底背离' if div == 'bullish' else '顶背离'} {dist:.1f}%"}
 
 
@@ -116,40 +210,97 @@ def _check_macd_divergence(state: SignalState) -> dict | None:
         return None
     div = md["divergence"]
     dist = md.get("price_distance_pct", 0)
+    sev = "critical" if dist >= 5 else "high" if dist >= 3 else "medium"
     return {"direction": "long" if div == "bullish" else "short",
-            "severity": "critical" if dist >= 5 else "high",
-            "confidence": 0.75,
+            "severity": sev, "confidence": 0.75 if dist >= 5 else 0.65,
+            "price_distance_pct": dist,
             "evidence": f"{'底背离' if div == 'bullish' else '顶背离'} {dist:.1f}%"}
 
 
-def _check_volume_breakout(state: SignalState) -> dict | None:
-    vb = state.ind.get("volume_breakout")
-    if not vb or not vb.get("confirmed"):
+# --- 波动突变 ---
+
+def _check_atr_expansion(state: SignalState) -> dict | None:
+    """ATR 从历史低分位跃升 → 波动率启动信号"""
+    atr = state.ind.get("atr")
+    if not atr:
         return None
-    vr = vb.get("vol_ratio", 0)
-    chg = vb.get("price_change_pct", 0)
-    return {"direction": state.direction,
-            "severity": "critical" if vr >= 3 else "high",
-            "confidence": min(0.7 + (vr - 1.5) * 0.15, 0.95),
-            "evidence": f"量{vr:.1f}x 涨跌{chg:.1f}%"}
+    df = state.ind.get("df")
+    if df is None or len(df) < 20:
+        return None
+    # 计算近期 ATR 均值
+    recent_atr = df["close"].rolling(5).std().iloc[-1] if len(df) >= 5 else atr
+    long_atr = df["close"].rolling(20).std().iloc[-1] if len(df) >= 20 else atr
+    if long_atr == 0:
+        return None
+    expansion_ratio = recent_atr / long_atr
+    if expansion_ratio >= state.params.get("threshold", 1.8):
+        sev = "critical" if expansion_ratio >= 3 else "high"
+        # 配合历史分位（如果有）
+        bonus = ""
+        if state.atr_rank is not None:
+            if state.atr_rank < 20:
+                bonus = " 从低波启动"
+                sev = "critical"
+        return {"direction": state.direction, "severity": sev,
+                "confidence": min(0.65 + (expansion_ratio - 1.5) * 0.15, 0.9),
+                "evidence": f"波动爆发 ATR比{expansion_ratio:.1f}x{bonus}"}
 
 
-# ---- 信号注册表 --------------------------------------------------------------
+# --- 极端偏离 ---
+
+def _check_price_extreme(state: SignalState) -> dict | None:
+    """价格远离均线 → 均值回归概率高"""
+    close = state.ind.get("close")
+    ma60 = state.ind.get("ma60")
+    if not close or not ma60:
+        return None
+    df = state.ind.get("df")
+    if df is None or len(df) < 60:
+        return None
+    std = df["close"].rolling(60).std().iloc[-1]
+    if not std or std == 0:
+        return None
+    zscore = (close - ma60) / std
+    threshold = state.params.get("std_threshold", 3.0)
+    if abs(zscore) >= threshold:
+        direction = "short" if zscore > 0 else "long"
+        sev = "critical" if abs(zscore) >= 4 else "high"
+        where = "过高" if zscore > 0 else "过低"
+        return {"direction": direction, "severity": sev,
+                "confidence": min(0.6 + abs(zscore) * 0.1, 0.9),
+                "evidence": f"价格{where} Z={zscore:.1f}σ"}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 信号注册表 — 加信号只需要在这加一行
+# ═══════════════════════════════════════════════════════════════════════
 
 SIGNALS: list[SignalDef] = [
-    SignalDef("bb_squeeze",       "BB压缩",   _check_bb_squeeze,       {"threshold": 25}, "BB"),
-    SignalDef("rsi_extreme",      "RSI极值",  _check_rsi_extreme,      {"oversold": 30, "overbot": 70}, "RSI"),
-    SignalDef("ma_converge",      "MA汇聚",   _check_ma_converge,      {"threshold": 0.5}, "MA"),
-    SignalDef("macd_cross",       "MACD交叉", _check_macd_cross,       {}, "MACD"),
-    SignalDef("volume_spike",     "量能爆发", _check_volume_spike,     {"threshold": 3.0}, "VOL"),
-    SignalDef("ttm_squeeze",      "TTM压缩",  _check_ttm_squeeze,      {"min_bars": 5}, "TTM"),
-    SignalDef("rsi_divergence",   "RSI背离",  _check_rsi_divergence,   {}, "RSI背"),
-    SignalDef("macd_divergence",  "MACD背离", _check_macd_divergence,  {}, "MACD背"),
-    SignalDef("volume_breakout",  "量价突破", _check_volume_breakout,  {"threshold": 1.5}, "突破"),
+    # 波动收敛（左侧）
+    SignalDef("bb_squeeze",        "BB压缩",     _check_bb_squeeze,        {"threshold": 25}, "BB"),
+    SignalDef("ma_converge",       "MA汇聚",     _check_ma_converge,       {"threshold": 0.5}, "MA"),
+    SignalDef("ttm_squeeze",       "TTM压缩",    _check_ttm_squeeze,       {"min_bars": 5}, "TTM"),
+    SignalDef("compression_combo", "多重压缩",   _check_compression_combo, {}, "压"),
+    # RSI / 极端
+    SignalDef("rsi_extreme",       "RSI极值",    _check_rsi_extreme,       {"oversold": 25, "overbot": 75}, "RSI"),
+    SignalDef("price_extreme",     "价格极值",   _check_price_extreme,     {"std_threshold": 3.0}, "极"),
+    # 趋势确认（右侧）
+    SignalDef("ma_alignment",      "均线排列",   _check_ma_alignment,      {"adx_min": 25}, "MA排"),
+    SignalDef("adx_surge",         "ADX突破",    _check_adx_surge,         {"trend_threshold": 25}, "ADX"),
+    SignalDef("macd_cross",        "MACD交叉",   _check_macd_cross,        {}, "MACD"),
+    # 成交量
+    SignalDef("volume_spike",      "放量信号",   _check_volume_spike,      {"threshold": 3.0, "min_price_change": 0.3}, "VOL"),
+    # 背离
+    SignalDef("rsi_divergence",    "RSI背离",    _check_rsi_divergence,    {}, "RSI背"),
+    SignalDef("macd_divergence",   "MACD背离",   _check_macd_divergence,   {}, "MACD背"),
+    # 波动突变
+    SignalDef("atr_expansion",     "波动爆发",   _check_atr_expansion,     {"threshold": 1.8}, "ATR"),
 ]
 
 
-# ---- 方向判断 ----------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════
+# 方向 / 市场状态
+# ═══════════════════════════════════════════════════════════════════════
 
 def get_direction(ind: dict) -> str:
     pd_val = ind.get("plus_di", 0) or 0
