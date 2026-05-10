@@ -314,3 +314,119 @@ def get_direction(ind: dict) -> str:
 
 def get_regime(ind: dict) -> str:
     return "trend" if (ind.get("adx") or 0) >= 20 else "range"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Stage2 入场信号 — 多时间框架综合判断
+# ═══════════════════════════════════════════════════════════════════════
+
+@dataclass
+class EntrySignal:
+    symbol: str
+    signal_type: str      # "trend_breakout_long/short" | "range_reversion_long/short"
+    direction: str
+    entry_price: float
+    stop_loss: float
+    take_profit: float
+    risk_reward: float
+    evidence: str
+    confidence: float
+
+
+def check_stage2_entry(tf_data: dict[str, dict]) -> EntrySignal | None:
+    """检查 Stage2 入场信号（跨时间框架）"""
+    ind_15m = tf_data.get("15m", {})
+    ind_1h = tf_data.get("1h", {})
+    if not ind_15m:
+        return None
+
+    # 趋势突破
+    trend = _check_trend_breakout(ind_15m, ind_1h or ind_15m)
+    if trend:
+        return trend
+
+    # 震荡回归
+    reversion = _check_range_reversion(ind_15m, ind_1h or ind_15m)
+    if reversion:
+        return reversion
+
+    return None
+
+
+def _check_trend_breakout(ind_15m: dict, ind_1h: dict) -> EntrySignal | None:
+    """趋势突破入场"""
+    adx_15 = ind_15m.get("adx", 0) or 0
+    adx_1h = ind_1h.get("adx", 0) or 0
+    roc_15 = ind_15m.get("roc") or 0
+    vol = ind_15m.get("volume_ratio") or 1
+
+    # 条件: 15m ADX > 25, 1h ADX > 20, ROC 方向明确, 放量
+    if adx_15 < 25 or adx_1h < 20:
+        return None
+    if abs(roc_15) < 1.0:
+        return None
+    if vol < 1.5:
+        return None
+
+    atr = ind_15m.get("atr") or 0
+    close = ind_15m.get("close") or 0
+    if atr == 0 or close == 0:
+        return None
+
+    direction = "long" if roc_15 > 0 else "short"
+    entry = close
+    sl = entry - atr * 2.0 if direction == "long" else entry + atr * 2.0
+    tp = entry + atr * 2.5 if direction == "long" else entry - atr * 2.5
+    rr = abs(tp - entry) / abs(sl - entry) if abs(sl - entry) > 0 else 0
+
+    return EntrySignal(
+        symbol="",  # 由调用方填写
+        signal_type=f"trend_breakout_{direction}",
+        direction=direction,
+        entry_price=round(entry, 4),
+        stop_loss=round(sl, 4),
+        take_profit=round(tp, 4),
+        risk_reward=round(rr, 1),
+        evidence=f"趋势突破 ADX15={adx_15:.0f} ADX1h={adx_1h:.0f} ROC={roc_15:.1f}%",
+        confidence=min(0.7 + (adx_15 - 25) * 0.01 + (vol - 1.5) * 0.05, 0.95),
+    )
+
+
+def _check_range_reversion(ind_15m: dict, ind_1h: dict) -> EntrySignal | None:
+    """震荡回归入场"""
+    adx_15 = ind_15m.get("adx", 0) or 0
+    rsi_15 = ind_15m.get("rsi")
+    bb_w = ind_15m.get("bb_width")
+    close = ind_15m.get("close") or 0
+    atr = ind_15m.get("atr") or 0
+
+    if adx_15 >= 20 or rsi_15 is None or atr == 0:
+        return None
+
+    # 做多: RSI 超卖 + 价格接近 BB 下轨
+    if rsi_15 <= 30:
+        entry = close
+        sl = entry - atr * 1.5
+        tp = entry + atr * 2.0
+        return EntrySignal(
+            symbol="", signal_type="range_reversion_long", direction="long",
+            entry_price=round(entry, 4), stop_loss=round(sl, 4), take_profit=round(tp, 4),
+            risk_reward=round(abs(tp - entry) / abs(sl - entry), 1) if abs(sl - entry) > 0 else 0,
+            evidence=f"震荡做多 RSI={rsi_15:.0f} ADX={adx_15:.0f}",
+            confidence=0.7 if rsi_15 <= 25 else 0.6,
+        )
+
+    # 做空: RSI 超买
+    if rsi_15 >= 70:
+        entry = close
+        sl = entry + atr * 1.5
+        tp = entry - atr * 2.0
+        return EntrySignal(
+            symbol="", signal_type="range_reversion_short", direction="short",
+            entry_price=round(entry, 4), stop_loss=round(sl, 4), take_profit=round(tp, 4),
+            risk_reward=round(abs(tp - entry) / abs(sl - entry), 1) if abs(sl - entry) > 0 else 0,
+            evidence=f"震荡做空 RSI={rsi_15:.0f} ADX={adx_15:.0f}",
+            confidence=0.7 if rsi_15 >= 75 else 0.6,
+        )
+
+    return None

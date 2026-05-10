@@ -13,7 +13,7 @@ from loguru import logger
 
 from okx import OKXClient, KlineCache, Candle
 from indicators import compute as compute_indicators
-from signals import SIGNALS, SignalState, get_direction, get_regime
+from signals import SIGNALS, SignalState, get_direction, get_regime, check_stage2_entry, EntrySignal
 from notify import Feishu
 from utils import setup_logging, start_health_server
 
@@ -292,12 +292,16 @@ def do_scan(
     okx: OKXClient,
     cache: KlineCache,
     config: dict,
-) -> tuple[list[Alert], dict]:
+) -> tuple[list[Alert], dict[str, dict[str, dict]], list[EntrySignal]]:
+    """返回: (alerts, {sym: {tf: ind}}, stage2_entries)"""
     timeframes = config["timeframes"]
     alerts: list[Alert] = []
     ind_map: dict[str, dict] = {}
+    all_ind: dict[str, dict[str, dict]] = {}  # {sym: {tf: ind}}
+    stage2_entries: list[EntrySignal] = []
 
     for sym in okx.get_top_symbols(config["top_n"]):
+        tf_ind = {}
         for tf in timeframes:
             df = cache.get_df(sym, tf)
             if len(df) < 30:
@@ -308,7 +312,8 @@ def do_scan(
             if not ind:
                 continue
 
-            ind_map[sym] = ind
+            tf_ind[tf] = ind
+            ind_map[sym] = ind  # 最后写入的 tf（一般是 4h）用于 TOP5 排序
             direction = get_direction(ind)
             regime = get_regime(ind)
             state = SignalState(symbol=sym, timeframe=tf, ind=ind,
@@ -316,7 +321,6 @@ def do_scan(
 
             for sig_def in SIGNALS:
                 try:
-                    # 将 params 注入 state 供 check 函数使用
                     state.params = sig_def.params
                     result = sig_def.check(state)
                     if result:
@@ -332,7 +336,48 @@ def do_scan(
                 except Exception as e:
                     logger.debug(f"Signal check error {sig_def.id} {sym}: {e}")
 
-    return alerts, ind_map
+        if tf_ind:
+            all_ind[sym] = tf_ind
+
+        # Stage2 入场
+        if "15m" in tf_ind:
+            entry = check_stage2_entry(tf_ind)
+            if entry:
+                entry.symbol = sym
+                stage2_entries.append(entry)
+
+    return alerts, all_ind, stage2_entries
+
+
+def apply_mtf_boost(alerts: list[Alert]):
+    """多时间框架确认：同一 symbol+signal_type 在多个 TF 出现 → 提升置信度"""
+    grouped: dict[str, list[Alert]] = {}
+    for a in alerts:
+        key = f"{a.symbol}_{a.signal_type}"
+        grouped.setdefault(key, []).append(a)
+
+    for key, group in grouped.items():
+        tfs = set(a.timeframe for a in group)
+        if len(tfs) >= 2:
+            boost = 1.10 if len(tfs) == 2 else 1.20  # 2TF +10%, 3TF +20%
+            for a in group:
+                a.confidence = min(a.confidence * boost, 1.0)
+                a.details["mtf_boost"] = True
+                a.details["mtf_timeframes"] = list(tfs)
+
+
+def format_stage2_report(entries: list[EntrySignal], scan_time: datetime) -> str:
+    if not entries:
+        return ""
+    time_str = scan_time.strftime("%Y-%m-%d %H:%M")
+    lines = [f"\n[Stage2入场] {time_str}"]
+    for e in entries[:5]:
+        sym = e.symbol.replace("-USDT-SWAP", "/USDT")
+        dir_text = "做多" if e.direction == "long" else "做空"
+        sig_type = "趋势突破" if "trend" in e.signal_type else "震荡回归"
+        lines.append(f"  {sym} {sig_type}{dir_text} 入场:{e.entry_price} 止损:{e.stop_loss} 止盈:{e.take_profit} RR:{e.risk_reward}:1")
+        lines.append(f"  {e.evidence}")
+    return "\n".join(lines)
 
 
 # =============================================================================
@@ -423,26 +468,35 @@ async def async_main():
         scan_count += 1
         scan_start = datetime.now()
         try:
-            alerts, ind_map = do_scan(okx, cache, config)
+            alerts, all_ind, stage2 = do_scan(okx, cache, config)
+
+            # 多时间框架确认：同 signal 在多 TF 出现 → 置信度提升
+            apply_mtf_boost(alerts)
 
             # 置信度增强
             for a in alerts:
-                ind = ind_map.get(a.symbol, {})
+                ind = all_ind.get(a.symbol, {}).get(a.timeframe, {})
                 a.confidence = alert_filter._boost_confidence(a, ind)
 
             # 去重过滤
             filtered = alert_filter.filter(alerts)
 
             # 信号预警报告
-            if filtered:
-                report = format_alert_report(filtered, scan_start)
-                feishu.send(report)
-                logger.info(f"Scan #{scan_count}: {len(filtered)} alerts pushed")
+            if filtered or stage2:
+                stage2_text = format_stage2_report(stage2, scan_start) if stage2 else ""
+                if filtered:
+                    report = format_alert_report(filtered, scan_start) + stage2_text
+                    feishu.send(report)
+                    logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(stage2)} stage2 pushed")
+                elif stage2_text:
+                    feishu.send(stage2_text)
+                    logger.info(f"Scan #{scan_count}: {len(stage2)} stage2 entries")
 
-            # TOP5 排序（降低频率）
+            # TOP5 排序
             now = datetime.now()
             if filtered and (not last_ranking_time or (now - last_ranking_time).total_seconds() >= ranking_interval):
-                ranks = rank_symbols(alerts, ind_map)
+                # 用所有 TF 的 ind 数据做排序（取最新有数据的 tf）
+                ranks = rank_symbols(alerts, {sym: next(iter(tfs.values())) for sym, tfs in all_ind.items() if tfs})
                 if ranks:
                     ranking_report = format_ranking_report(ranks, scan_start)
                     feishu.send(ranking_report)
