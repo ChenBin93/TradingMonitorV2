@@ -267,36 +267,53 @@ def format_consolidated_report(
 ) -> str:
     """合并预警 + 排名 + Stage2 为一条消息"""
     time_str = scan_time.strftime("%H:%M")
+
+    # 低质量过滤：RR < 1.5 且没有 critical severity 的不推
+    quality = []
+    for a in filtered:
+        rr_str = a.meta.get("rr", "0:1").split(":")[0]
+        try:
+            rr_val = float(rr_str)
+        except ValueError:
+            rr_val = 0
+        if rr_val >= 1.5 or a.severity == "critical":
+            quality.append(a)
+
+    # 按排名顺序对齐
+    rank_order = {r.symbol: i for i, r in enumerate(ranks)}
+    quality.sort(key=lambda a: (rank_order.get(a.symbol, 999), -a.confidence))
+
+    # 多空统计
+    longs = sum(1 for a in quality if a.direction == "long")
+    shorts = sum(1 for a in quality if a.direction == "short")
+
     lines = [f"━━━ V2 扫描 {time_str} ━━━",
-             f"{symbol_count}币 | {total_alerts}信号 | 推送{len(filtered)}条"]
+             f"{symbol_count}币 | {total_alerts}信号 | 推送{len(quality)}条 | 多{longs}/空{shorts}"]
 
-    # ── 高亮预警 (top 6, 按置信度排序) ──
-    top6 = sorted([a for a in filtered if a.severity in ("critical", "high")],
-                  key=lambda x: x.confidence, reverse=True)[:6]
-    if top6:
-        for a in top6:
-            lines.append(fmt_short_alert(a))
-
-    # ── TOP5 排名 ──
-    if ranks:
-        lines.append(f"\n━━━ 综合排名 TOP{min(5, len(ranks))} ━━━")
-        for i, r in enumerate(ranks[:5], 1):
-            sym = r.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
-            dir_map = {"long": "多", "short": "空"}
-            d = dir_map.get(r.direction, "")
-            tags = "/".join(r.signal_tags[:3])
-            reason = "/".join(r.reasons[:2])
-            lines.append(f"{i}. {sym} {d} {r.score:.0%} | {tags} | {reason}")
-
-    # ── Stage2 入场 ──
+    # ── Stage2 入场 (稀有，放最前面) ──
     if stage2:
-        lines.append(f"\n━━━ Stage2 入场 ━━━")
+        lines.append("")
         for e in stage2[:3]:
             sym = e.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
             dir_text = "多" if e.direction == "long" else "空"
             sig_type = "趋势突破" if "trend" in e.signal_type else "震荡回归"
-            lines.append(f"{sym} {sig_type}{dir_text} 入场:{e.entry_price} SL:{e.stop_loss} TP:{e.take_profit} RR:{e.risk_reward}:1")
-            lines.append(f"  {e.evidence}")
+            lines.append(f"🟢 {sym} Stage2 {sig_type}{dir_text} 入场:{e.entry_price} SL:{e.stop_loss} TP:{e.take_profit} RR:{e.risk_reward}:1")
+
+    # ── 预警列表 ──
+    if quality:
+        lines.append("")
+        for i, a in enumerate(quality[:8]):
+            lines.append(fmt_short_alert(a))
+
+    # ── TOP5 排名 ──
+    if ranks:
+        lines.append(f"\n━━━ TOP{min(5, len(ranks))} ━━━")
+        for i, r in enumerate(ranks[:5], 1):
+            sym = r.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
+            d = {"long": "多", "short": "空"}.get(r.direction, "")
+            tags = "/".join(r.signal_tags[:3])
+            reason = "/".join(r.reasons[:2])
+            lines.append(f"{i}. {sym} {d} {r.score:.0%} | {tags} | {reason}")
 
     return "\n".join(lines)
 
