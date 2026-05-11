@@ -188,8 +188,10 @@ class SymbolRank:
     reasons: list[str]
 
 
-def rank_symbols(alerts: list[Alert], ind_map: dict) -> list[SymbolRank]:
+def rank_symbols(alerts: list[Alert], all_ind: dict[str, dict[str, dict]]) -> list[SymbolRank]:
+    """多维度符号排序：综合信号强度、动量、压缩、成交量"""
     scores: dict[str, dict] = {}
+
     for a in alerts:
         s = scores.setdefault(a.symbol, {
             "direction": a.direction, "regime": a.regime, "timeframe": a.timeframe,
@@ -199,16 +201,25 @@ def rank_symbols(alerts: list[Alert], ind_map: dict) -> list[SymbolRank]:
         s["conf"] = max(s["conf"], a.confidence)
 
         d = a.details
-        if a.signal_type in ("bb_squeeze", "ttm_squeeze"):
+
+        # 压缩维度：BB rank / TTM squeeze / compression combo
+        if a.signal_type in ("bb_squeeze", "ttm_squeeze", "compression_combo", "ma_converge"):
             rank_val = d.get("bbw_rank", 50)
             s["compression"] = max(s["compression"], (100 - rank_val) / 100)
-        if a.signal_type in ("volume_spike", "volume_breakout"):
-            vr = d.get("volume_ratio", d.get("vol_ratio", 1))
+        if a.signal_type == "atr_expansion":
+            s["compression"] = max(s["compression"], 0.7)
+
+        # 成交量维度
+        if a.signal_type in ("volume_spike",):
+            vr = d.get("volume_ratio", 1)
             s["volume"] = max(s["volume"], min(vr / 3, 1))
 
-        ind = ind_map.get(a.symbol, {})
-        adx_v = ind.get("adx", 0) or 0
-        s["momentum"] = max(s["momentum"], min(adx_v / 40, 1))
+        # 动量维度：用 4h + 1h ADX
+        tf_data = all_ind.get(a.symbol, {})
+        for tf in ("4h", "1h"):
+            ind = tf_data.get(tf, {})
+            adx_v = ind.get("adx", 0) or 0
+            s["momentum"] = max(s["momentum"], min(adx_v / 40, 1))
 
     result = []
     for sym, s in scores.items():
@@ -674,7 +685,7 @@ async def async_main():
             now = datetime.now()
             if filtered and (not last_ranking_time or (now - last_ranking_time).total_seconds() >= ranking_interval):
                 # 用所有 TF 的 ind 数据做排序（取最新有数据的 tf）
-                ranks = rank_symbols(alerts, {sym: next(iter(tfs.values())) for sym, tfs in all_ind.items() if tfs})
+                ranks = rank_symbols(alerts, all_ind)
                 if ranks:
                     ranking_report = format_ranking_report(ranks, scan_start)
                     feishu.send(ranking_report)
