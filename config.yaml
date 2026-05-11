@@ -1,7 +1,7 @@
 # TradingMonitor V2 — 配置
 
 # --- 数据源 ---
-top_n: 5
+top_n: 30
 # watchlist:  # 如果配置了白名单，只监控这些（注释掉则用 top_n）
 #   - BTC/USDT:USDT
 #   - ETH/USDT:USDT
