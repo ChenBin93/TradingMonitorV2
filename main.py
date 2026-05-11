@@ -536,11 +536,12 @@ async def async_main():
     )
     cache = KlineCache(max_candles=500)
 
-    feishu_cfg = secrets.get("feishu", {})
+    feishu_cfg = secrets.get("feishu", secrets.get("feishu_signal", {}))
     feishu = Feishu(
         app_id=feishu_cfg.get("app_id", ""),
         app_secret=feishu_cfg.get("app_secret", ""),
         chat_id=feishu_cfg.get("chat_id", ""),
+        webhook_url=feishu_cfg.get("webhook_url", ""),
     )
 
     symbols = okx.get_top_symbols(config["top_n"])
@@ -569,8 +570,12 @@ async def async_main():
     def on_kline(sym: str, tf: str, candle: Candle):
         cache.update(sym, tf, candle)
 
-    await okx.ws_connect(symbols, timeframes, on_kline)
-    await asyncio.sleep(10)  # 等初批数据
+    try:
+        await okx.ws_connect(symbols, timeframes, on_kline)
+        await asyncio.sleep(10)  # 等初批数据
+    except Exception as e:
+        logger.error(f"WebSocket connection failed: {e}")
+        return
 
     # 后台线程：历史数据下载
     def history_thread():
@@ -645,12 +650,26 @@ async def async_main():
 
 
 def main():
-    signal.signal(signal.SIGINT, lambda s, f: asyncio.get_event_loop().stop())
-    signal.signal(signal.SIGTERM, lambda s, f: asyncio.get_event_loop().stop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    shutdown_flag = False
+
+    def _shutdown(sig, frame):
+        nonlocal shutdown_flag
+        shutdown_flag = True
+        logger.info(f"Signal {sig} received, shutting down...")
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
     try:
-        asyncio.run(async_main())
+        loop.run_until_complete(async_main())
     except KeyboardInterrupt:
-        logger.info("Shutdown")
+        pass
+    finally:
+        loop.close()
+        logger.info("Shutdown complete")
 
 
 if __name__ == "__main__":
