@@ -16,6 +16,7 @@ from indicators import compute as compute_indicators
 from signals import SIGNALS, SignalState, get_direction, get_regime, check_stage2_entry, EntrySignal
 from notify import Feishu
 from utils import setup_logging, start_health_server
+from support_resistance import find_swing_levels, get_nearest_levels
 
 
 # =============================================================================
@@ -59,6 +60,8 @@ class Alert:
     confidence: float
     evidence: str
     details: dict = field(default_factory=dict)
+    meta: dict = field(default_factory=dict)    # 增强信息(S/R/SL/TP/RR)
+    checklist: list[str] = field(default_factory=list)
     timestamp: datetime = field(default_factory=datetime.now)
 
     @property
@@ -233,23 +236,47 @@ def format_alert_report(alerts: list[Alert], scan_time: datetime) -> str:
     time_str = scan_time.strftime("%Y-%m-%d %H:%M")
     lines = [f"[信号预警] {time_str}"]
 
-    critical = [a for a in alerts if a.severity == "critical"]
-    high = [a for a in alerts if a.severity == "high"]
+    critical = [a for a in alerts if a.severity == "critical"][:5]
+    high = [a for a in alerts if a.severity == "high"][:6]
 
-    if critical:
-        lines.append(f"\n【强烈信号】({len(critical)}个)")
-        for a in critical:
+    for label, subset in [("强烈信号", critical), ("准备信号", high)]:
+        if not subset:
+            continue
+        lines.append(f"\n【{label}】({len(subset)}个)")
+        for a in subset:
             sym = a.symbol.replace("-USDT-SWAP", "/USDT")
             dir_text = "做多" if a.direction == "long" else "做空"
+            m = a.meta
+
             lines.append(f"  {sym}[{a.timeframe}] {dir_text} {a.name} 置信:{a.confidence:.0%}")
             lines.append(f"  {a.evidence}")
 
-    if high:
-        lines.append(f"\n【准备信号】({len(high)}个)")
-        for a in high[:8]:
-            sym = a.symbol.replace("-USDT-SWAP", "/USDT")
-            dir_text = "做多" if a.direction == "long" else "做空"
-            lines.append(f"  {sym}[{a.timeframe}] {dir_text} {a.name} 置信:{a.confidence:.0%}")
+            # 4h 背景
+            bg_parts = []
+            if m.get("4h_ma"):
+                bg_parts.append(f"4h:{m['4h_ma']}")
+            if m.get("4h_adx"):
+                bg_parts.append(f"ADX{m['4h_adx']}{m.get('4h_adx_trend','')}")
+            if m.get("4h_bb"):
+                bb_map = {"expanding": "扩张", "contracting": "收缩", "flat": "平直"}
+                bg_parts.append(f"BB{bb_map.get(m['4h_bb'], m['4h_bb'])}")
+            if bg_parts:
+                lines.append(f"  {' | '.join(bg_parts)}")
+
+            # S/R + SL/TP/RR
+            trade_parts = []
+            if m.get("support"):
+                trade_parts.append(f"支撑:{m['support']}")
+            if m.get("resistance"):
+                trade_parts.append(f"阻力:{m['resistance']}")
+            if m.get("sl") and m.get("tp"):
+                trade_parts.append(f"SL:{m['sl']} TP:{m['tp']} RR:{m.get('rr','?')}")
+            if trade_parts:
+                lines.append(f"  {' | '.join(trade_parts)}")
+
+            # 清单
+            if a.checklist:
+                lines.append(f"  {' '.join(a.checklist)}")
 
     return "\n".join(lines)
 
@@ -313,7 +340,7 @@ def do_scan(
                 continue
 
             tf_ind[tf] = ind
-            ind_map[sym] = ind  # 最后写入的 tf（一般是 4h）用于 TOP5 排序
+            ind_map[sym] = ind
             direction = get_direction(ind)
             regime = get_regime(ind)
             state = SignalState(symbol=sym, timeframe=tf, ind=ind,
@@ -324,7 +351,7 @@ def do_scan(
                     state.params = sig_def.params
                     result = sig_def.check(state)
                     if result:
-                        alerts.append(Alert(
+                        alert = Alert(
                             symbol=sym, timeframe=tf,
                             signal_type=sig_def.id, signal_name=sig_def.name,
                             regime=regime, direction=result.get("direction", direction),
@@ -332,7 +359,11 @@ def do_scan(
                             confidence=result.get("confidence", 0.5),
                             evidence=result.get("evidence", ""),
                             details=result,
-                        ))
+                        )
+                        # 1h 信号附加结构信息
+                        if tf == "1h" or tf in tf_ind:
+                            _enrich_alert(alert, tf_ind, sym)
+                        alerts.append(alert)
                 except Exception as e:
                     logger.debug(f"Signal check error {sig_def.id} {sym}: {e}")
 
@@ -347,6 +378,109 @@ def do_scan(
                 stage2_entries.append(entry)
 
     return alerts, all_ind, stage2_entries
+
+
+def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
+    """为 alert 附加 4h 方向 + 1h S/R + SL/TP/RR + 清单"""
+    check = []
+
+    # ── 4h 方向信息 ──
+    ind_4h = tf_ind.get("4h")
+    if ind_4h:
+        ma = ind_4h.get("ma_alignment", "neutral")
+        alert.meta["4h_ma"] = "多头排列" if ma == "bullish" else "空头排列" if ma == "bearish" else "均线交叉"
+        alert.meta["4h_adx"] = f"{ind_4h.get('adx', 0) or 0:.0f}"
+        alert.meta["4h_adx_trend"] = "↑" if ind_4h.get("adx_trend") == "up" else "↓"
+        alert.meta["4h_bb"] = ind_4h.get("bb_state", "unknown")
+
+        # checklist: 方向
+        if ma in ("bullish", "bearish"):
+            if (ma == "bullish" and alert.direction == "long") or (ma == "bearish" and alert.direction == "short"):
+                check.append("✓方向")
+            else:
+                check.append("✗方向")
+        else:
+            check.append("?方向")
+
+    # ── 1h S/R ──
+    df_1h = tf_ind.get("1h", {}).get("df")
+    current_price = tf_ind.get("1h", tf_ind.get("15m", {})).get("close")
+    if df_1h is not None and current_price:
+        levels = find_swing_levels(df_1h, lookback=50)
+        support, resistance = get_nearest_levels(levels, current_price)
+
+        if support:
+            alert.meta["support"] = f"{support.price:.4f}({support.strength},{support.touch_count}触)"
+        if resistance:
+            alert.meta["resistance"] = f"{resistance.price:.4f}({resistance.strength},{resistance.touch_count}触)"
+
+        # ── SL/TP/RR ──
+        atr = tf_ind.get("15m", tf_ind.get("1h", {})).get("atr") or 1
+        entry_price = current_price
+
+        if alert.direction == "long":
+            sl = support.price - atr * 0.3 if support else entry_price - atr * 1.5
+            tp = resistance.price if resistance else entry_price + atr * 2.5
+        elif alert.direction == "short":
+            sl = resistance.price + atr * 0.3 if resistance else entry_price + atr * 1.5
+            tp = support.price if support else entry_price - atr * 2.5
+        else:
+            sl = entry_price - atr * 1.5
+            tp = entry_price + atr * 1.5
+
+        alert.meta["sl"] = f"{sl:.4f}"
+        alert.meta["tp"] = f"{tp:.4f}"
+        sl_dist = abs(entry_price - sl)
+        tp_dist = abs(tp - entry_price)
+        rr = tp_dist / sl_dist if sl_dist > 0 else 0
+        alert.meta["rr"] = f"{rr:.1f}:1"
+
+        # checklist
+        if rr >= 2.0:
+            check.append("✓盈亏比")
+        elif rr >= 1.5:
+            check.append("⚠盈亏比")
+        else:
+            check.append("✗盈亏比")
+
+        # 位置
+        pos_in_range = None
+        if support and resistance and resistance.price > support.price:
+            pos_in_range = (current_price - support.price) / (resistance.price - support.price)
+        if alert.direction == "long" and support:
+            if pos_in_range is not None and pos_in_range <= 0.3:
+                check.append("✓近支撑")
+            elif support.touch_count >= 2:
+                check.append("✓有支撑")
+            else:
+                check.append("?无支撑")
+        elif alert.direction == "short" and resistance:
+            if pos_in_range is not None and pos_in_range >= 0.7:
+                check.append("✓近阻力")
+            elif resistance.touch_count >= 2:
+                check.append("✓有阻力")
+            else:
+                check.append("?无阻力")
+        else:
+            check.append("?边界")
+
+    # ── 压缩 & 确认 ──
+    ind_15m = tf_ind.get("15m", {})
+    comp_bars = ind_15m.get("compression_bars", 0)
+    if comp_bars >= 6:
+        check.append("✓压缩")
+        alert.meta["compression"] = f"{comp_bars}根"
+    elif comp_bars >= 3:
+        check.append("⚠压缩")
+        alert.meta["compression"] = f"{comp_bars}根"
+
+    # 量
+    vr = tf_ind.get("15m", tf_ind.get("1h", {})).get("volume_ratio") or 1
+    if vr >= 1.5:
+        check.append("✓放量")
+        alert.meta["vol_ratio"] = f"{vr:.1f}x"
+
+    alert.checklist = check
 
 
 def apply_mtf_boost(alerts: list[Alert]):

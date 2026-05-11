@@ -52,6 +52,12 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
         "macd_line": v(macd_line), "signal_line": v(signal_line),
         "ttm_squeeze": ttm_squeeze, "rsi_divergence": rsi_div,
         "macd_divergence": macd_div, "volume_breakout": vol_breakout,
+        # 新增：结构判断
+        "ma_alignment": _ma_alignment(ma5, ma20, ma60),
+        "bb_state": _bb_state(bb_width) if len(bb_width) > 10 else "unknown",
+        "price_vs_ma60": "above" if v(df["close"]) and v(ma60) and v(df["close"]) > v(ma60) else "below",
+        "compression_bars": _count_compression_bars(df),
+        "adx_trend": "up" if len(adx) > 5 and adx.iloc[-1] > adx.iloc[-5] else "down",
         "df": df,
     }
 
@@ -202,3 +208,46 @@ def _check_vol_breakout(df, vol_ma, vol_ratio, threshold=1.5):
         }
     except Exception:
         return None
+
+
+def _ma_alignment(ma5, ma20, ma60) -> str:
+    try:
+        if ma5.iloc[-1] > ma20.iloc[-1] > ma60.iloc[-1]:
+            return "bullish"
+        elif ma5.iloc[-1] < ma20.iloc[-1] < ma60.iloc[-1]:
+            return "bearish"
+        return "neutral"
+    except Exception:
+        return "neutral"
+
+
+def _bb_state(bb_width) -> str:
+    """判断布林带状态：expanding(扩张) / contracting(收缩) / flat(平直)"""
+    try:
+        recent = bb_width.iloc[-10:]
+        first_half = recent.iloc[:5].mean()
+        second_half = recent.iloc[5:].mean()
+        if second_half > first_half * 1.15:
+            return "expanding"
+        elif second_half < first_half * 0.85:
+            return "contracting"
+        return "flat"
+    except Exception:
+        return "unknown"
+
+
+def _count_compression_bars(df) -> int:
+    """统计最近连续小实体 K 线根数（压缩)"""
+    try:
+        count = 0
+        closes = df["close"].values
+        for i in range(len(df) - 1, -1, -1):
+            body = abs(closes[i] - df["open"].values[i])
+            avg_body = np.mean(abs(np.diff(closes[max(0, i-20):i+1]))) if i > 5 else body
+            if avg_body > 0 and body < avg_body * 0.6:
+                count += 1
+            else:
+                break
+        return count
+    except Exception:
+        return 0
