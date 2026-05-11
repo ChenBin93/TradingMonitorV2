@@ -233,22 +233,30 @@ def rank_symbols(alerts: list[Alert], ind_map: dict) -> list[SymbolRank]:
 # =============================================================================
 
 def format_alert_report(alerts: list[Alert], scan_time: datetime) -> str:
-    time_str = scan_time.strftime("%Y-%m-%d %H:%M")
-    lines = [f"[信号预警] {time_str}"]
+    time_str = scan_time.strftime("%H:%M")
+    lines = [f"【V2预警】{time_str}"]
 
-    critical = [a for a in alerts if a.severity == "critical"][:5]
-    high = [a for a in alerts if a.severity == "high"][:6]
+    # 按 strategy 分组
+    breakout = [a for a in alerts if a.signal_type in ("bb_squeeze", "ma_converge", "ttm_squeeze", "compression_combo", "volume_spike", "adx_surge", "atr_expansion")]
+    reversion = [a for a in alerts if a.signal_type in ("rsi_extreme", "price_extreme", "rsi_divergence", "macd_divergence")]
+    trend = [a for a in alerts if a.signal_type in ("ma_alignment", "macd_cross")]
 
-    for label, subset in [("强烈信号", critical), ("准备信号", high)]:
+    pushed = 0
+    for label, group in [("突破蓄力", breakout), ("回归反转", reversion), ("趋势确认", trend)]:
+        subset = [a for a in group if a.severity in ("critical", "high")][:3]
         if not subset:
             continue
-        lines.append(f"\n【{label}】({len(subset)}个)")
+        lines.append(f"\n━━━ {label} ━━━")
         for a in subset:
-            sym = a.symbol.replace("-USDT-SWAP", "/USDT")
-            dir_text = "做多" if a.direction == "long" else "做空"
+            pushed += 1
+            sym = a.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
+            dir_text = {"long": "多", "short": "空"}.get(a.direction, "")
             m = a.meta
 
-            lines.append(f"  {sym}[{a.timeframe}] {dir_text} {a.name} 置信:{a.confidence:.0%}")
+            tag_line = f"#{pushed} {sym}[{a.timeframe}] {dir_text} {a.name} {a.confidence:.0%}"
+            lines.append(tag_line)
+
+            # 证据
             lines.append(f"  {a.evidence}")
 
             # 4h 背景
@@ -261,23 +269,28 @@ def format_alert_report(alerts: list[Alert], scan_time: datetime) -> str:
                 bb_map = {"expanding": "扩张", "contracting": "收缩", "flat": "平直"}
                 bg_parts.append(f"BB{bb_map.get(m['4h_bb'], m['4h_bb'])}")
             if bg_parts:
-                lines.append(f"  {' | '.join(bg_parts)}")
+                lines.append(f"  背景: {' | '.join(bg_parts)}")
 
             # S/R + SL/TP/RR
-            trade_parts = []
-            if m.get("support"):
-                trade_parts.append(f"支撑:{m['support']}")
-            if m.get("resistance"):
-                trade_parts.append(f"阻力:{m['resistance']}")
-            if m.get("sl") and m.get("tp"):
-                trade_parts.append(f"SL:{m['sl']} TP:{m['tp']} RR:{m.get('rr','?')}")
-            if trade_parts:
-                lines.append(f"  {' | '.join(trade_parts)}")
+            s = m.get("support", "-")
+            r = m.get("resistance", "-")
+            lines.append(f"  S:{s} R:{r}")
+
+            sl = m.get("sl", "-")
+            tp_val = m.get("tp", "-")
+            rr = m.get("rr", "?:1")
+            lines.append(f"  入场:{a.symbol.split(':')[0]} SL:{sl} TP:{tp_val} RR:{rr}")
 
             # 清单
             if a.checklist:
                 lines.append(f"  {' '.join(a.checklist)}")
 
+    if pushed == 0:
+        return ""
+
+    # 统计行
+    total = len(alerts)
+    lines.insert(1, f"扫描{total}信号 → 推送{pushed}条")
     return "\n".join(lines)
 
 
@@ -323,24 +336,29 @@ def do_scan(
     """返回: (alerts, {sym: {tf: ind}}, stage2_entries)"""
     timeframes = config["timeframes"]
     alerts: list[Alert] = []
-    ind_map: dict[str, dict] = {}
-    all_ind: dict[str, dict[str, dict]] = {}  # {sym: {tf: ind}}
+    all_ind: dict[str, dict[str, dict]] = {}
     stage2_entries: list[EntrySignal] = []
 
     for sym in okx.get_top_symbols(config["top_n"]):
-        tf_ind = {}
+        tf_ind: dict[str, dict] = {}
+
+        # ── 第一遍：收集所有 TF 的指标数据 ──
         for tf in timeframes:
             df = cache.get_df(sym, tf)
             if len(df) < 30:
                 continue
-
             ind_params = config["indicators"].get(tf, config["indicators"]["15m"])
             ind = compute_indicators(df, ind_params)
-            if not ind:
-                continue
+            if ind:
+                tf_ind[tf] = ind
 
-            tf_ind[tf] = ind
-            ind_map[sym] = ind
+        if not tf_ind:
+            continue
+
+        all_ind[sym] = tf_ind
+
+        # ── 第二遍：逐 TF 检查信号 ──
+        for tf, ind in tf_ind.items():
             direction = get_direction(ind)
             regime = get_regime(ind)
             state = SignalState(symbol=sym, timeframe=tf, ind=ind,
@@ -360,15 +378,14 @@ def do_scan(
                             evidence=result.get("evidence", ""),
                             details=result,
                         )
-                        # 1h 信号附加结构信息
-                        if tf == "1h" or tf in tf_ind:
-                            _enrich_alert(alert, tf_ind, sym)
                         alerts.append(alert)
                 except Exception as e:
                     logger.debug(f"Signal check error {sig_def.id} {sym}: {e}")
 
-        if tf_ind:
-            all_ind[sym] = tf_ind
+        # ── 第三遍：所有 TF 数据齐全，统一 enrich ──
+        sym_alerts = [a for a in alerts if a.symbol == sym]
+        for alert in sym_alerts:
+            _enrich_alert(alert, tf_ind, sym)
 
         # Stage2 入场
         if "15m" in tf_ind:
@@ -393,7 +410,6 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
         alert.meta["4h_adx_trend"] = "↑" if ind_4h.get("adx_trend") == "up" else "↓"
         alert.meta["4h_bb"] = ind_4h.get("bb_state", "unknown")
 
-        # checklist: 方向
         if ma in ("bullish", "bearish"):
             if (ma == "bullish" and alert.direction == "long") or (ma == "bearish" and alert.direction == "short"):
                 check.append("✓方向")
@@ -402,46 +418,24 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
         else:
             check.append("?方向")
 
-    # ── 1h S/R ──
-    df_1h = tf_ind.get("1h", {}).get("df")
-    current_price = tf_ind.get("1h", tf_ind.get("15m", {})).get("close")
+    # ── 1h S/R + SL/TP/RR ──
+    ind_1h = tf_ind.get("1h")
+    ind_base = ind_1h or tf_ind.get("15m", {})
+    df_1h = (ind_1h or {}).get("df")
+    current_price = ind_base.get("close")
+    atr = ind_base.get("atr") or 1
+
+    sr_info = {}
     if df_1h is not None and current_price:
         levels = find_swing_levels(df_1h, lookback=50)
         support, resistance = get_nearest_levels(levels, current_price)
 
         if support:
-            alert.meta["support"] = f"{support.price:.4f}({support.strength},{support.touch_count}触)"
+            alert.meta["support"] = f"{support.price:.0f}({support.strength},{support.touch_count}触)"
+            sr_info["support"] = support
         if resistance:
-            alert.meta["resistance"] = f"{resistance.price:.4f}({resistance.strength},{resistance.touch_count}触)"
-
-        # ── SL/TP/RR ──
-        atr = tf_ind.get("15m", tf_ind.get("1h", {})).get("atr") or 1
-        entry_price = current_price
-
-        if alert.direction == "long":
-            sl = support.price - atr * 0.3 if support else entry_price - atr * 1.5
-            tp = resistance.price if resistance else entry_price + atr * 2.5
-        elif alert.direction == "short":
-            sl = resistance.price + atr * 0.3 if resistance else entry_price + atr * 1.5
-            tp = support.price if support else entry_price - atr * 2.5
-        else:
-            sl = entry_price - atr * 1.5
-            tp = entry_price + atr * 1.5
-
-        alert.meta["sl"] = f"{sl:.4f}"
-        alert.meta["tp"] = f"{tp:.4f}"
-        sl_dist = abs(entry_price - sl)
-        tp_dist = abs(tp - entry_price)
-        rr = tp_dist / sl_dist if sl_dist > 0 else 0
-        alert.meta["rr"] = f"{rr:.1f}:1"
-
-        # checklist
-        if rr >= 2.0:
-            check.append("✓盈亏比")
-        elif rr >= 1.5:
-            check.append("⚠盈亏比")
-        else:
-            check.append("✗盈亏比")
+            alert.meta["resistance"] = f"{resistance.price:.0f}({resistance.strength},{resistance.touch_count}触)"
+            sr_info["resistance"] = resistance
 
         # 位置
         pos_in_range = None
@@ -464,21 +458,49 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
         else:
             check.append("?边界")
 
-    # ── 压缩 & 确认 ──
-    ind_15m = tf_ind.get("15m", {})
-    comp_bars = ind_15m.get("compression_bars", 0)
-    if comp_bars >= 6:
-        check.append("✓压缩")
-        alert.meta["compression"] = f"{comp_bars}根"
-    elif comp_bars >= 3:
-        check.append("⚠压缩")
-        alert.meta["compression"] = f"{comp_bars}根"
+    # ── SL/TP/RR 计算 ──
+    entry_price = current_price or ind_base.get("close") or 0
+    sl = tp = 0
 
-    # 量
-    vr = tf_ind.get("15m", tf_ind.get("1h", {})).get("volume_ratio") or 1
+    if alert.direction == "long":
+        sl = sr_info["support"].price - atr * 0.3 if "support" in sr_info else entry_price - atr * 1.5
+        tp = sr_info["resistance"].price if "resistance" in sr_info else entry_price + atr * 2.5
+        # 确保 tp > sl
+        if tp <= sl or tp <= entry_price:
+            tp = entry_price + atr * 2.5
+    elif alert.direction == "short":
+        sl = sr_info["resistance"].price + atr * 0.3 if "resistance" in sr_info else entry_price + atr * 1.5
+        tp = sr_info["support"].price if "support" in sr_info else entry_price - atr * 2.5
+        if tp >= sl or tp >= entry_price:
+            tp = entry_price - atr * 2.5
+    else:
+        sl = entry_price - atr * 1.5
+        tp = entry_price + atr * 1.5
+
+    alert.meta["sl"] = f"{sl:.0f}"
+    alert.meta["tp"] = f"{tp:.0f}"
+    sl_dist = abs(entry_price - sl)
+    tp_dist = abs(tp - entry_price)
+    rr = tp_dist / sl_dist if sl_dist > 0 else 0
+    alert.meta["rr"] = f"{rr:.1f}:1"
+
+    if rr >= 2.0:
+        check.append("✓盈亏比")
+    elif rr >= 1.5:
+        check.append("⚠盈亏比")
+    else:
+        check.append("✗盈亏比")
+
+    # ── 压缩 & 量 ──
+    comp_bars = ind_base.get("compression_bars", 0)
+    if comp_bars >= 6:
+        check.append(f"✓压缩{comp_bars}根")
+    elif comp_bars >= 3:
+        check.append(f"⚠压缩{comp_bars}根")
+
+    vr = ind_base.get("volume_ratio") or 1
     if vr >= 1.5:
-        check.append("✓放量")
-        alert.meta["vol_ratio"] = f"{vr:.1f}x"
+        check.append(f"✓放量{vr:.1f}x")
 
     alert.checklist = check
 
