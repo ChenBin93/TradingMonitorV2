@@ -328,8 +328,16 @@ def format_ranking_report(ranks: list[SymbolRank], scan_time: datetime) -> str:
 # 主扫描逻辑
 # =============================================================================
 
+def get_symbols(okx: OKXClient, config: dict) -> list[str]:
+    """获取监控标列表：白名单优先，否则 top_n"""
+    watchlist = config.get("watchlist", [])
+    if watchlist:
+        return watchlist
+    return okx.get_top_symbols(config.get("top_n", 20))
+
+
 def do_scan(
-    okx: OKXClient,
+    symbols: list[str],
     cache: KlineCache,
     config: dict,
 ) -> tuple[list[Alert], dict[str, dict[str, dict]], list[EntrySignal]]:
@@ -339,7 +347,7 @@ def do_scan(
     all_ind: dict[str, dict[str, dict]] = {}
     stage2_entries: list[EntrySignal] = []
 
-    for sym in okx.get_top_symbols(config["top_n"]):
+    for sym in symbols:
         tf_ind: dict[str, dict] = {}
 
         # ── 第一遍：收集所有 TF 的指标数据 ──
@@ -575,7 +583,7 @@ async def async_main():
         webhook_url=pos_cfg.get("webhook_url", ""),
     )
 
-    symbols = okx.get_top_symbols(config["top_n"])
+    symbols = get_symbols(okx, config)
     timeframes = config["timeframes"]
     logger.info(f"Monitoring {len(symbols)} symbols x {len(timeframes)} timeframes")
 
@@ -638,7 +646,7 @@ async def async_main():
         scan_count += 1
         scan_start = datetime.now()
         try:
-            alerts, all_ind, stage2 = do_scan(okx, cache, config)
+            alerts, all_ind, stage2 = do_scan(symbols, cache, config)
 
             # 多时间框架确认：同 signal 在多 TF 出现 → 置信度提升
             apply_mtf_boost(alerts)
