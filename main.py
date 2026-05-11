@@ -544,6 +544,15 @@ async def async_main():
         webhook_url=feishu_cfg.get("webhook_url", ""),
     )
 
+    # 持仓推送用独立群
+    pos_cfg = secrets.get("feishu_position", {})
+    feishu_position = Feishu(
+        app_id=pos_cfg.get("app_id", ""),
+        app_secret=pos_cfg.get("app_secret", ""),
+        chat_id=pos_cfg.get("chat_id", ""),
+        webhook_url=pos_cfg.get("webhook_url", ""),
+    )
+
     symbols = okx.get_top_symbols(config["top_n"])
     timeframes = config["timeframes"]
     logger.info(f"Monitoring {len(symbols)} symbols x {len(timeframes)} timeframes")
@@ -588,7 +597,7 @@ async def async_main():
     pos_thread = None
     if okx_cfg.get("api_key"):
         from position import PositionMonitor
-        pm = PositionMonitor(config, feishu, secrets)
+        pm = PositionMonitor(config, feishu_position, secrets)
         pos_thread = threading.Thread(target=pm.run, daemon=True, name="position")
         pos_thread.start()
 
