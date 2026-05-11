@@ -243,94 +243,60 @@ def rank_symbols(alerts: list[Alert], all_ind: dict[str, dict[str, dict]]) -> li
 # 飞书报告格式化
 # =============================================================================
 
-def format_alert_report(alerts: list[Alert], scan_time: datetime) -> str:
+def fmt_short_alert(a: Alert) -> str:
+    """单条预警的紧凑格式"""
+    sym = a.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
+    dir_map = {"long": "多", "short": "空"}
+    d = dir_map.get(a.direction, "")
+    m = a.meta
+    severity_icon = "🔴" if a.severity == "critical" else "🟠"
+    rr = m.get("rr", "-")
+    s = m.get("support", "-")
+    r = m.get("resistance", "-")
+    checks = " ".join([c for c in a.checklist if c.startswith("✓") or c.startswith("⚠")][:4])
+    return f"{severity_icon} {sym}[{a.timeframe}] {d} {a.name} RR:{rr}\n   S:{s} R:{r} | {checks}"
+
+
+def format_consolidated_report(
+    filtered: list[Alert],
+    ranks: list[SymbolRank],
+    stage2: list[EntrySignal],
+    total_alerts: int,
+    symbol_count: int,
+    scan_time: datetime,
+) -> str:
+    """合并预警 + 排名 + Stage2 为一条消息"""
     time_str = scan_time.strftime("%H:%M")
-    lines = [f"【V2预警】{time_str}"]
+    lines = [f"━━━ V2 扫描 {time_str} ━━━",
+             f"{symbol_count}币 | {total_alerts}信号 | 推送{len(filtered)}条"]
 
-    # 按 strategy 分组
-    breakout = [a for a in alerts if a.signal_type in ("bb_squeeze", "ma_converge", "ttm_squeeze", "compression_combo", "volume_spike", "adx_surge", "atr_expansion")]
-    reversion = [a for a in alerts if a.signal_type in ("rsi_extreme", "price_extreme", "rsi_divergence", "macd_divergence")]
-    trend = [a for a in alerts if a.signal_type in ("ma_alignment", "macd_cross")]
+    # ── 高亮预警 (top 6, 按置信度排序) ──
+    top6 = sorted([a for a in filtered if a.severity in ("critical", "high")],
+                  key=lambda x: x.confidence, reverse=True)[:6]
+    if top6:
+        for a in top6:
+            lines.append(fmt_short_alert(a))
 
-    pushed = 0
-    for label, group in [("突破蓄力", breakout), ("回归反转", reversion), ("趋势确认", trend)]:
-        subset = [a for a in group if a.severity in ("critical", "high")][:3]
-        if not subset:
-            continue
-        lines.append(f"\n━━━ {label} ━━━")
-        for a in subset:
-            pushed += 1
-            sym = a.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
-            dir_text = {"long": "多", "short": "空"}.get(a.direction, "")
-            m = a.meta
-
-            tag_line = f"#{pushed} {sym}[{a.timeframe}] {dir_text} {a.name} {a.confidence:.0%}"
-            lines.append(tag_line)
-
-            # 证据
-            lines.append(f"  {a.evidence}")
-
-            # 4h 背景
-            bg_parts = []
-            if m.get("4h_ma"):
-                bg_parts.append(f"4h:{m['4h_ma']}")
-            if m.get("4h_adx"):
-                bg_parts.append(f"ADX{m['4h_adx']}{m.get('4h_adx_trend','')}")
-            if m.get("4h_bb"):
-                bb_map = {"expanding": "扩张", "contracting": "收缩", "flat": "平直"}
-                bg_parts.append(f"BB{bb_map.get(m['4h_bb'], m['4h_bb'])}")
-            if bg_parts:
-                lines.append(f"  背景: {' | '.join(bg_parts)}")
-
-            # S/R + SL/TP/RR
-            s = m.get("support", "-")
-            r = m.get("resistance", "-")
-            lines.append(f"  S:{s} R:{r}")
-
-            sl = m.get("sl", "-")
-            tp_val = m.get("tp", "-")
-            rr = m.get("rr", "?:1")
-            lines.append(f"  入场:{a.symbol.split(':')[0]} SL:{sl} TP:{tp_val} RR:{rr}")
-
-            # 清单
-            if a.checklist:
-                lines.append(f"  {' '.join(a.checklist)}")
-
-    if pushed == 0:
-        return ""
-
-    # 统计行
-    total = len(alerts)
-    lines.insert(1, f"扫描{total}信号 → 推送{pushed}条")
-    return "\n".join(lines)
-
-
-def format_ranking_report(ranks: list[SymbolRank], scan_time: datetime) -> str:
-    time_str = scan_time.strftime("%Y-%m-%d %H:%M")
-    lines = [f"[TOP5推荐] {time_str}"]
-
-    trending = [r for r in ranks if r.regime == "trend"][:5]
-    consolidating = [r for r in ranks if r.regime == "range"][:5]
-
-    if trending:
-        lines.append("\n【趋势市场】TOP5:")
-        for i, r in enumerate(trending, 1):
-            sym = r.symbol.replace("-USDT-SWAP", "/USDT")
-            dir_text = "做多" if r.direction == "long" else "做空"
+    # ── TOP5 排名 ──
+    if ranks:
+        lines.append(f"\n━━━ 综合排名 TOP{min(5, len(ranks))} ━━━")
+        for i, r in enumerate(ranks[:5], 1):
+            sym = r.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
+            dir_map = {"long": "多", "short": "空"}
+            d = dir_map.get(r.direction, "")
             tags = "/".join(r.signal_tags[:3])
-            reason = "/".join(r.reasons)
-            lines.append(f"{i}. {sym}[{r.timeframe}] {dir_text} {r.score:.0%}")
-            lines.append(f"   理由:{reason} 信号:{tags} 置信:{r.confidence:.0%}")
+            reason = "/".join(r.reasons[:2])
+            lines.append(f"{i}. {sym} {d} {r.score:.0%} | {tags} | {reason}")
 
-    if consolidating:
-        lines.append("\n【震荡市场】TOP5:")
-        for i, r in enumerate(consolidating, 1):
-            sym = r.symbol.replace("-USDT-SWAP", "/USDT")
-            dir_text = "做多" if r.direction == "long" else "做空"
-            tags = "/".join(r.signal_tags[:3])
-            reason = "/".join(r.reasons)
-            lines.append(f"{i}. {sym}[{r.timeframe}] {dir_text} {r.score:.0%}")
-            lines.append(f"   理由:{reason} 信号:{tags} 置信:{r.confidence:.0%}")
+    # ── Stage2 入场 ──
+    if stage2:
+        lines.append(f"\n━━━ Stage2 入场 ━━━")
+        for e in stage2[:3]:
+            sym = e.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
+            dir_text = "多" if e.direction == "long" else "空"
+            sig_type = "趋势突破" if "trend" in e.signal_type else "震荡回归"
+            lines.append(f"{sym} {sig_type}{dir_text} 入场:{e.entry_price} SL:{e.stop_loss} TP:{e.take_profit} RR:{e.risk_reward}:1")
+            lines.append(f"  {e.evidence}")
 
     return "\n".join(lines)
 
@@ -649,8 +615,6 @@ async def async_main():
         min_confidence=config.get("alert", {}).get("min_confidence", 0.65),
     )
     scan_count = 0
-    last_ranking_time: datetime | None = None
-    ranking_interval = 300  # TOP5 每 5 分钟推送一次
 
     while True:
         await asyncio.sleep(interval)
@@ -670,30 +634,15 @@ async def async_main():
             # 去重过滤
             filtered = alert_filter.filter(alerts)
 
-            # 信号预警报告
-            if filtered or stage2:
-                stage2_text = format_stage2_report(stage2, scan_start) if stage2 else ""
-                if filtered:
-                    report = format_alert_report(filtered, scan_start) + stage2_text
-                    feishu.send(report)
-                    logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(stage2)} stage2 pushed")
-                elif stage2_text:
-                    feishu.send(stage2_text)
-                    logger.info(f"Scan #{scan_count}: {len(stage2)} stage2 entries")
-
             # TOP5 排序
-            now = datetime.now()
-            if filtered and (not last_ranking_time or (now - last_ranking_time).total_seconds() >= ranking_interval):
-                # 用所有 TF 的 ind 数据做排序（取最新有数据的 tf）
-                ranks = rank_symbols(alerts, all_ind)
-                if ranks:
-                    ranking_report = format_ranking_report(ranks, scan_start)
-                    feishu.send(ranking_report)
-                    last_ranking_time = now
-                    logger.info(f"Scan #{scan_count}: ranking pushed ({len(ranks)} symbols)")
+            ranks = rank_symbols(alerts, all_ind) if filtered else []
 
-            elapsed = (datetime.now() - scan_start).total_seconds()
-            logger.debug(f"Scan #{scan_count}: {len(alerts)} alerts, {elapsed:.1f}s")
+            # 合并推送
+            if filtered or stage2:
+                report = format_consolidated_report(
+                    filtered, ranks, stage2, len(alerts), len(symbols), scan_start)
+                feishu.send(report)
+                logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(ranks)} ranked, {len(stage2)} stage2")
 
         except Exception as e:
             logger.error(f"Scan #{scan_count} error: {e}")
