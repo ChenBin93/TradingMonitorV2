@@ -142,20 +142,41 @@ def select_symbols(
     return result
 
 
+def update_config(selected: list[str], config_path: str = "config.yaml"):
+    """将筛选结果写入 config.yaml 的 watchlist"""
+    import yaml
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+
+    cfg["watchlist"] = selected
+    # 注释掉 top_n，白名单优先
+    if "top_n" in cfg:
+        cfg.pop("top_n", None)
+
+    with open(config_path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    print(f"已写入 {config_path}: {len(selected)} 币")
+
+
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser(description="币种筛选器")
-    p.add_argument("--pool", type=int, default=100, help="初筛池大小")
-    p.add_argument("--corr", type=float, default=0.8, help="相关性上限")
-    p.add_argument("--tf", default="4h", help="时间框架")
-    p.add_argument("--bars", type=int, default=60, help="回看 K 线数")
-    p.add_argument("--min-score", type=float, default=0.3, help="结构分最低阈值")
+    p.add_argument("--pool", type=int, default=100)
+    p.add_argument("--corr", type=float, default=0.8)
+    p.add_argument("--tf", default="4h")
+    p.add_argument("--bars", type=int, default=60)
+    p.add_argument("--min-score", type=float, default=0.3)
+    p.add_argument("--write-config", action="store_true", help="直接写入 config.yaml")
     args = p.parse_args()
 
-    select_symbols(
+    result = select_symbols(
         pool_size=args.pool,
         max_correlation=args.corr,
         tf=args.tf,
         lookback_bars=args.bars,
         min_structure_score=args.min_score,
     )
+
+    if args.write_config and result:
+        update_config(result)
