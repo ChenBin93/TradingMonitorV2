@@ -376,7 +376,7 @@ def _check_trend_breakout(ind_15m: dict, ind_1h: dict) -> EntrySignal | None:
     direction = "long" if roc_15 > 0 else "short"
     entry = close
     sl = entry - atr * 2.0 if direction == "long" else entry + atr * 2.0
-    tp = entry + atr * 2.5 if direction == "long" else entry - atr * 2.5
+    tp = entry + atr * 4.0 if direction == "long" else entry - atr * 4.0
     rr = abs(tp - entry) / abs(sl - entry) if abs(sl - entry) > 0 else 0
 
     return EntrySignal(
@@ -407,7 +407,7 @@ def _check_range_reversion(ind_15m: dict, ind_1h: dict) -> EntrySignal | None:
     if rsi_15 <= 30:
         entry = close
         sl = entry - atr * 1.5
-        tp = entry + atr * 2.0
+        tp = entry + atr * 3.0
         return EntrySignal(
             symbol="", signal_type="range_reversion_long", direction="long",
             entry_price=round(entry, 4), stop_loss=round(sl, 4), take_profit=round(tp, 4),
@@ -420,7 +420,7 @@ def _check_range_reversion(ind_15m: dict, ind_1h: dict) -> EntrySignal | None:
     if rsi_15 >= 70:
         entry = close
         sl = entry + atr * 1.5
-        tp = entry - atr * 2.0
+        tp = entry - atr * 3.0
         return EntrySignal(
             symbol="", signal_type="range_reversion_short", direction="short",
             entry_price=round(entry, 4), stop_loss=round(sl, 4), take_profit=round(tp, 4),

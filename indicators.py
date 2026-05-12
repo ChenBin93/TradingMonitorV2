@@ -43,10 +43,13 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
     else:
         macd_cross = None
 
+    # 布林带宽度短期百分位 (最近 20 根 K 线内)
+    bb_short_pct = _local_percentile(bb_width, lookback=20)
+
     return {
         "close": v(df["close"]), "roc": v(roc), "rsi": v(rsi), "adx": v(adx),
         "plus_di": v(plus_di), "minus_di": v(minus_di),
-        "bb_width": v(bb_width), "atr": v(atr),
+        "bb_width": v(bb_width), "bb_width_short_pct": bb_short_pct, "atr": v(atr),
         "volume_ratio": v(vol_ratio), "ma5": v(ma5), "ma20": v(ma20), "ma60": v(ma60),
         "ma_converge": ma_converge, "macd_hist": v(histogram), "macd_cross": macd_cross,
         "macd_line": v(macd_line), "signal_line": v(signal_line),
@@ -251,3 +254,17 @@ def _count_compression_bars(df) -> int:
         return count
     except Exception:
         return 0
+
+
+def _local_percentile(series, lookback: int = 20) -> float | None:
+    """计算最近 lookback 根 K 线内的百分位 (0-100, 越小越压缩)"""
+    try:
+        recent = series.tail(lookback).dropna()
+        if len(recent) < 5:
+            return None
+        current = series.iloc[-1]
+        if pd.isna(current):
+            return None
+        return float((recent < current).sum() / len(recent) * 100)
+    except Exception:
+        return None

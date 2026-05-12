@@ -84,6 +84,11 @@ class Alert:
                  "price_extreme": "价格极值"}
         return names.get(self.signal_type, self.signal_type)
 
+    @property
+    def tf_role(self) -> str:
+        """三层角色: 4h→方向 1h→结构 15m→执行"""
+        return {"4h": "方向", "1h": "结构", "15m": "执行"}.get(self.timeframe, self.timeframe)
+
 
 # =============================================================================
 # 去重 + 置信度增强
@@ -254,7 +259,8 @@ def fmt_short_alert(a: Alert) -> str:
     s = m.get("support", "-")
     r = m.get("resistance", "-")
     checks = " ".join([c for c in a.checklist if c.startswith("✓") or c.startswith("⚠")][:4])
-    return f"{severity_icon} {sym}[{a.timeframe}] {d} {a.name} RR:{rr}\n   S:{s} R:{r} | {checks}"
+    role = a.tf_role
+    return f"{severity_icon} {sym}[{a.timeframe}·{role}] {d} {a.name} RR:{rr}\n   S:{s} R:{r} | {checks}"
 
 
 def format_consolidated_report(
@@ -364,7 +370,7 @@ def do_scan(
             direction = get_direction(ind)
             regime = get_regime(ind)
             state = SignalState(symbol=sym, timeframe=tf, ind=ind,
-                                bbw_rank=None, regime=regime, direction=direction)
+                                bbw_rank=ind.get("bb_width_short_pct"), regime=regime, direction=direction)
 
             for sig_def in SIGNALS:
                 try:
@@ -508,7 +514,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
 
 
 def apply_mtf_boost(alerts: list[Alert]):
-    """多时间框架确认：同一 symbol+signal_type 在多个 TF 出现 → 提升置信度"""
+    """多时间框架确认：同一 signal_type 在多个 TF 出现且方向一致 → 提升置信度"""
     grouped: dict[str, list[Alert]] = {}
     for a in alerts:
         key = f"{a.symbol}_{a.signal_type}"
@@ -517,11 +523,14 @@ def apply_mtf_boost(alerts: list[Alert]):
     for key, group in grouped.items():
         tfs = set(a.timeframe for a in group)
         if len(tfs) >= 2:
-            boost = 1.10 if len(tfs) == 2 else 1.20  # 2TF +10%, 3TF +20%
-            for a in group:
-                a.confidence = min(a.confidence * boost, 1.0)
-                a.details["mtf_boost"] = True
-                a.details["mtf_timeframes"] = list(tfs)
+            # 检查方向一致性
+            dirs = set(a.direction for a in group if a.direction != "neutral")
+            if len(dirs) <= 1:  # 所有信号同向或中性
+                boost = 1.10 if len(tfs) == 2 else 1.20
+                for a in group:
+                    a.confidence = min(a.confidence * boost, 1.0)
+                    a.details["mtf_boost"] = True
+                    a.details["mtf_timeframes"] = list(tfs)
 
 
 def format_stage2_report(entries: list[EntrySignal], scan_time: datetime) -> str:
