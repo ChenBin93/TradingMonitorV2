@@ -29,6 +29,7 @@ history:
 
 # --- 持仓监控 ---
 position:
+  enabled: false
   interval_seconds: 60
   pnl_loss_pct: 5.0
   pnl_profit_pct: 10.0

@@ -628,7 +628,8 @@ async def async_main():
 
     # 持仓监控
     pos_thread = None
-    if okx_cfg.get("api_key"):
+    pos_cfg = config.get("position", {})
+    if pos_cfg.get("enabled", True) and okx_cfg.get("api_key"):
         from position import PositionMonitor
         pm = PositionMonitor(config, feishu_position, secrets)
         pos_thread = threading.Thread(target=pm.run, daemon=True, name="position")
