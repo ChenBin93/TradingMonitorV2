@@ -86,6 +86,69 @@ class OKXClient:
             "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5],
         } for c in ohlcv]
 
+    def fetch_ohlcv_extended(self, symbol: str, timeframe: str, min_bars: int = 500) -> list[dict]:
+        """迭代下载历史 K 线，使用 OKX REST API 直接分页"""
+        import time, requests
+
+        inst_id = symbol.replace("/", "-").replace(":USDT", "-SWAP")
+        bar_map = {"15m": "15m", "1h": "1H", "4h": "4H"}
+        bar = bar_map.get(timeframe, timeframe)
+
+        all_bars = []
+        after_ts = None
+
+        while len(all_bars) < min_bars:
+            params = {"instId": inst_id, "bar": bar, "limit": "300"}
+            if after_ts is not None:
+                params["after"] = str(after_ts)
+
+            # 先尝试历史端点（支持更早的数据）
+            try:
+                resp = requests.get(
+                    "https://www.okx.com/api/v5/market/history-candles",
+                    params=params, timeout=15)
+                data = resp.json()
+            except Exception:
+                break
+
+            if data.get("code") != "0" or not data.get("data"):
+                # 回退到实时端点
+                try:
+                    resp = requests.get(
+                        "https://www.okx.com/api/v5/market/candles",
+                        params=params, timeout=15)
+                    data = resp.json()
+                except Exception:
+                    break
+
+            if data.get("code") != "0" or not data.get("data"):
+                break
+
+            batch = []
+            for b in data["data"]:
+                ts = datetime.fromtimestamp(int(b[0]) / 1000)
+                batch.append({
+                    "timestamp": ts,
+                    "open": float(b[1]), "high": float(b[2]),
+                    "low": float(b[3]), "close": float(b[4]), "volume": float(b[5]),
+                })
+
+            if not all_bars:
+                all_bars = batch
+            else:
+                existing_ts = {b["timestamp"] for b in all_bars}
+                new_batch = [b for b in batch if b["timestamp"] not in existing_ts]
+                if not new_batch:
+                    break
+                all_bars = sorted(batch + all_bars, key=lambda x: x["timestamp"])
+
+            # 下一次请求: after = 最老 K 线 ts（毫秒）
+            oldest_ts_ms = int(batch[-1]["timestamp"].timestamp() * 1000)
+            after_ts = oldest_ts_ms - 1
+            time.sleep(0.2)
+
+        return sorted(all_bars, key=lambda x: x["timestamp"])
+
     # --- WebSocket ---
     async def ws_connect(self, symbols: list[str], timeframes: list[str],
                          on_kline: Callable, on_trade: Callable | None = None):
