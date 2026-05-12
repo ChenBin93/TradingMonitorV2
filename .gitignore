@@ -6,3 +6,7 @@ secrets.yaml
 data/*.db
 logs/*.log
 .venv/
+docs/COACHING_*.md
+docs/ORDERBOOK_*.md
+docs/SCENARIO_*.md
+docs/MULTIPLIER_*.md
