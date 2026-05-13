@@ -580,12 +580,12 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
                 vp_nodes = get_nearest_nodes(vp, current_price)
                 if vp_nodes["support"]:
                     p = vp_nodes["support"]["price"]
-                    sf = "{:.0f}" if p > 100 else "{:.1f}" if p > 1 else "{:.5f}"
-                    alert.meta["vp_support"] = f"{sf}(量节点)"
+                    sp = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
+                    alert.meta["vp_support"] = f"{sp}(量节点)"
                 if vp_nodes["resistance"]:
                     p = vp_nodes["resistance"]["price"]
-                    sf = "{:.0f}" if p > 100 else "{:.1f}" if p > 1 else "{:.5f}"
-                    alert.meta["vp_resistance"] = f"{sf}(量节点)"
+                    sp = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
+                    alert.meta["vp_resistance"] = f"{sp}(量节点)"
         except Exception:
             pass
 
