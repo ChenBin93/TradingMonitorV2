@@ -313,6 +313,11 @@ def format_consolidated_report(
         if is_mid and not mtf_boost and a.severity != "critical":
             continue
 
+        # 方向冲突：非 critical 信号 + 高 TF 方向不一致 → 丢弃
+        has_dir_fail = any(c == "✗方向" for c in a.checklist)
+        if has_dir_fail and a.severity != "critical":
+            continue
+
         quality.append(a)
 
     # 合并同一币种+同信号+同方向 → 一行展示所有TF
@@ -443,20 +448,34 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
 
     # ── 4h 方向信息 ──
     ind_4h = tf_ind.get("4h")
+    dir_4h = "neutral"
     if ind_4h:
-        ma = ind_4h.get("ma_alignment", "neutral")
-        alert.meta["4h_ma"] = "多头排列" if ma == "bullish" else "空头排列" if ma == "bearish" else "均线交叉"
+        dir_4h = ind_4h.get("ma_alignment", "neutral")
+        alert.meta["4h_ma"] = "多头排列" if dir_4h == "bullish" else "空头排列" if dir_4h == "bearish" else "均线交叉"
         alert.meta["4h_adx"] = f"{ind_4h.get('adx', 0) or 0:.0f}"
         alert.meta["4h_adx_trend"] = "↑" if ind_4h.get("adx_trend") == "up" else "↓"
         alert.meta["4h_bb"] = ind_4h.get("bb_state", "unknown")
 
-        if ma in ("bullish", "bearish"):
-            if (ma == "bullish" and alert.direction == "long") or (ma == "bearish" and alert.direction == "short"):
-                check.append("✓方向")
-            else:
-                check.append("✗方向")
+    # 1h 方向
+    ind_1h = tf_ind.get("1h")
+    dir_1h = "neutral"
+    if ind_1h:
+        dir_1h = ind_1h.get("ma_alignment", "neutral")
+
+    # ── 方向确认：至少一个高 TF 同意信号方向，优先信 4h ──
+    sig_dir = alert.direction
+    if dir_4h in ("bullish", "bearish"):
+        if (dir_4h == "bullish" and sig_dir == "long") or (dir_4h == "bearish" and sig_dir == "short"):
+            check.append("✓方向")
         else:
-            check.append("?方向")
+            check.append("✗方向")
+    elif dir_1h in ("bullish", "bearish"):
+        if (dir_1h == "bullish" and sig_dir == "long") or (dir_1h == "bearish" and sig_dir == "short"):
+            check.append("✓方向(1h)")
+        else:
+            check.append("✗方向")
+    else:
+        check.append("?方向")
 
     # ── 1h S/R + SL/TP/RR ──
     ind_1h = tf_ind.get("1h")
