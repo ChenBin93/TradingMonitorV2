@@ -328,7 +328,25 @@ def format_consolidated_report(
             sym = e.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
             dir_text = "多" if e.direction == "long" else "空"
             sig_type = "趋势突破" if "trend" in e.signal_type else "震荡回归"
-            lines.append(f"🟢 {sym} Stage2 {sig_type}{dir_text} 入场:{e.entry_price} SL:{e.stop_loss} TP:{e.take_profit} RR:{e.risk_reward}:1")
+            # Stage2 仓位计算
+            sl_dist = abs(e.entry_price - e.stop_loss)
+            margin_info = ""
+            try:
+                import yaml
+                with open("config.yaml") as f:
+                    acct = yaml.safe_load(f).get("account", {})
+                risk_pct = acct.get("risk_pct", 15)
+                leverage = acct.get("leverage", 10)
+                if sl_dist > 0:
+                    margin_pct = e.entry_price * risk_pct / (sl_dist * leverage)
+                    if margin_pct <= 100:
+                        margin_info = f"仓位{margin_pct:.0f}%({leverage}x)"
+                    else:
+                        need_lev = int(margin_pct * leverage / 100) + 1
+                        margin_info = f"仓位{margin_pct:.0f}%({leverage}x)→需{need_lev}x"
+            except Exception:
+                pass
+            lines.append(f"🟢 {sym} Stage2 {sig_type}{dir_text} 入场:{e.entry_price} SL:{e.stop_loss} TP:{e.take_profit} RR:{e.risk_reward}:1 {margin_info}")
 
     # ── 预警列表 ──
     if quality:
