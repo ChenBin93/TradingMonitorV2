@@ -126,6 +126,8 @@ class AlertFilter:
         elif a.signal_type == "ma_converge":
             mc = d.get("ma_converge", 1)
             if mc <= 0.2: conf += 0.08
+            # 回测: 多头胜率55% vs 空头18% — 空头降权
+            if a.direction == "short": conf -= 0.15
 
         elif a.signal_type == "ttm_squeeze":
             if d.get("is_fired"): conf += 0.15
@@ -139,6 +141,15 @@ class AlertFilter:
         elif a.signal_type == "ma_alignment":
             spread = abs(ind.get("close", 0) - (ind.get("ma60") or 0)) / (ind.get("ma60") or 1) * 100
             if spread > 8: conf += 0.08
+            # 回测: 空头胜率45% vs 多头18% — 方向不对称
+            if a.direction == "long": conf -= 0.10
+            elif a.direction == "short": conf += 0.05
+
+        elif a.signal_type == "ma_converge":
+            mc = d.get("ma_converge", 1)
+            if mc <= 0.2: conf += 0.08
+            # 回测: 多头胜率55% vs 空头18% — 只做多
+            if a.direction == "short": conf -= 0.15
 
         elif a.signal_type == "adx_surge":
             adx = ind.get("adx", 0)
@@ -274,7 +285,8 @@ def format_consolidated_report(
     """合并预警 + 排名 + Stage2 为一条消息"""
     time_str = scan_time.strftime("%H:%M")
 
-    # 低质量过滤：RR < 1.5 且没有 critical severity 的不推
+    # 低质量过滤：RR < 1.5 且非 critical 的不推
+    # 中间位置 + 无MTF确认 → 降级（回测胜率仅 35%）
     quality = []
     for a in filtered:
         rr_str = a.meta.get("rr", "0:1").split(":")[0]
@@ -282,8 +294,18 @@ def format_consolidated_report(
             rr_val = float(rr_str)
         except ValueError:
             rr_val = 0
-        if rr_val >= 1.5 or a.severity == "critical":
-            quality.append(a)
+
+        # RR 硬门槛
+        if rr_val < 1.5 and a.severity != "critical":
+            continue
+
+        # 中间位置 + 无 MTF → 只保留 critical
+        mtf_boost = a.details.get("mtf_boost", False)
+        is_mid = any(c.startswith("?") for c in a.checklist if "边界" in c or "支撑" in c or "阻力" in c)
+        if is_mid and not mtf_boost and a.severity != "critical":
+            continue
+
+        quality.append(a)
 
     # 按排名顺序对齐
     rank_order = {r.symbol: i for i, r in enumerate(ranks)}
