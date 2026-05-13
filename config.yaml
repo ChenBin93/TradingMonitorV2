@@ -1,33 +1,51 @@
-# TradingMonitor V2 — 配置
-
-# --- 数据源 ---
-top_n: 30
-# watchlist:  # 如果配置了白名单，只监控这些（注释掉则用 top_n）
-#   - BTC/USDT:USDT
-#   - ETH/USDT:USDT
-#   - SOL/USDT:USDT
-timeframes: [15m, 1h, 4h]
-
-# --- 扫描 ---
-scan_interval: 120
-
-# --- 指标参数 (按timeframe区分) ---
+timeframes:
+- 15m
+- 1h
+- 4h
+scan_interval: 900
 indicators:
-  15m: { roc_period: 5, rsi_period: 14, adx_period: 14, bb_period: 20, bb_std: 2, atr_period: 14, volume_ma_period: 20, ma_short: 5, ma_mid: 20, ma_long: 60 }
-  1h:  { roc_period: 10, rsi_period: 14, adx_period: 14, bb_period: 20, bb_std: 2, atr_period: 14, volume_ma_period: 20, ma_short: 5, ma_mid: 20, ma_long: 60 }
-  4h:  { roc_period: 20, rsi_period: 14, adx_period: 14, bb_period: 20, bb_std: 2, atr_period: 14, volume_ma_period: 20, ma_short: 5, ma_mid: 20, ma_long: 60 }
-
-# --- 告警 ---
+  15m:
+    roc_period: 5
+    rsi_period: 14
+    adx_period: 14
+    bb_period: 20
+    bb_std: 2
+    atr_period: 14
+    volume_ma_period: 20
+    ma_short: 5
+    ma_mid: 20
+    ma_long: 60
+  1h:
+    roc_period: 10
+    rsi_period: 14
+    adx_period: 14
+    bb_period: 20
+    bb_std: 2
+    atr_period: 14
+    volume_ma_period: 20
+    ma_short: 5
+    ma_mid: 20
+    ma_long: 60
+  4h:
+    roc_period: 20
+    rsi_period: 14
+    adx_period: 14
+    bb_period: 20
+    bb_std: 2
+    atr_period: 14
+    volume_ma_period: 20
+    ma_short: 5
+    ma_mid: 20
+    ma_long: 60
 alert:
-  dedup_minutes: 30
+  dedup_minutes: 60
   min_confidence: 0.65
-
-# --- 历史数据 ---
 history:
-  lookback_days: [90, 180, 365]
+  lookback_days:
+  - 90
+  - 180
+  - 365
   db_path: data/history.db
-
-# --- 持仓监控 ---
 position:
   enabled: false
   interval_seconds: 60
@@ -36,13 +54,64 @@ position:
   max_hours: 4
   auto_exit: true
   initial_sl_pct: 3.0
-
-# --- 健康检查 ---
 health:
   enabled: true
   port: 8080
-
-# --- 日志 ---
 logging:
   level: INFO
   file: logs/main.log
+watchlist:
+- COST/USDT:USDT
+- AMZN/USDT:USDT
+- AAPL/USDT:USDT
+- BTC/USDT:USDT
+- API3/USDT:USDT
+- AVGO/USDT:USDT
+- ASTER/USDT:USDT
+- OKB/USDT:USDT
+- ENSO/USDT:USDT
+- BLUR/USDT:USDT
+- CC/USDT:USDT
+- CFX/USDT:USDT
+- 0G/USDT:USDT
+- ACT/USDT:USDT
+- ENJ/USDT:USDT
+- COAI/USDT:USDT
+- AAVE/USDT:USDT
+- BMNR/USDT:USDT
+- BNB/USDT:USDT
+- DOGE/USDT:USDT
+- BCH/USDT:USDT
+- AIXBT/USDT:USDT
+- 1INCH/USDT:USDT
+- EDGE/USDT:USDT
+- COIN/USDT:USDT
+- AXS/USDT:USDT
+- BREV/USDT:USDT
+- APE/USDT:USDT
+- BAT/USDT:USDT
+- AVNT/USDT:USDT
+- ESP/USDT:USDT
+- BAND/USDT:USDT
+- AGLD/USDT:USDT
+- ARKM/USDT:USDT
+- AEVO/USDT:USDT
+- CRV/USDT:USDT
+- CRO/USDT:USDT
+- COMP/USDT:USDT
+- BIGTIME/USDT:USDT
+- APR/USDT:USDT
+- ACH/USDT:USDT
+- SOL/USDT:USDT
+- CHZ/USDT:USDT
+- ATOM/USDT:USDT
+- 2Z/USDT:USDT
+- BLEND/USDT:USDT
+- CVX/USDT:USDT
+- APT/USDT:USDT
+- WLFI/USDT:USDT
+- AT/USDT:USDT
+- CRCL/USDT:USDT
+- DYDX/USDT:USDT
+- EIGEN/USDT:USDT
+- AZTEC/USDT:USDT

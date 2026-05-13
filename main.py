@@ -664,6 +664,7 @@ async def async_main():
         min_confidence=config.get("alert", {}).get("min_confidence", 0.65),
     )
     scan_count = 0
+    _stage2_last: dict[str, datetime] = {}  # Stage2 去重
 
     while True:
         await asyncio.sleep(interval)
@@ -671,6 +672,18 @@ async def async_main():
         scan_start = datetime.now()
         try:
             alerts, all_ind, stage2 = do_scan(symbols, cache, config)
+
+            # Stage2 去重: 同 symbol+signal_type 60分钟内只推一次
+            stage2_deduped = []
+            now = datetime.now()
+            for e in stage2:
+                key = f"{e.symbol}_{e.signal_type}"
+                last = _stage2_last.get(key)
+                if last and (now - last).total_seconds() < 3600:
+                    continue
+                _stage2_last[key] = now
+                stage2_deduped.append(e)
+            stage2 = stage2_deduped
 
             # 多时间框架确认：同 signal 在多 TF 出现 → 置信度提升
             apply_mtf_boost(alerts)
