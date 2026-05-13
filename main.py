@@ -17,6 +17,7 @@ from signals import SIGNALS, SignalState, get_direction, get_regime
 from notify import Feishu
 from utils import setup_logging, start_health_server
 from support_resistance import find_swing_levels, get_nearest_levels
+from volume_profile import compute_volume_profile, get_nearest_nodes
 
 
 # =============================================================================
@@ -277,7 +278,12 @@ def fmt_short_alert(a: Alert) -> str:
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
     opt_line = f"\n   最优: {opt_entry}→RR:{opt_rr}" if opt_entry and opt_rr else ""
-    return f"{line}\n{line2}{opt_line}"
+    vp_s = m.get("vp_support", "")
+    vp_r = m.get("vp_resistance", "")
+    vp_line = f"\n   量防线: S:{vp_s} R:{vp_r}" if vp_s or vp_r else ""
+    trail = m.get("trailing", "")
+    trail_line = f"\n   {trail}" if trail else ""
+    return f"{line}\n{line2}{opt_line}{vp_line}{trail_line}"
 
 
 def format_consolidated_report(
@@ -566,6 +572,23 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
             else:
                 check.append("⚠防线弱·RR高")
 
+    # ── 成交量分布防线（量加权 S/R 与极点聚类互补）──
+    if df_1h is not None and current_price:
+        try:
+            vp = compute_volume_profile(df_1h)
+            if vp:
+                vp_nodes = get_nearest_nodes(vp, current_price)
+                if vp_nodes["support"]:
+                    p = vp_nodes["support"]["price"]
+                    sf = "{:.0f}" if p > 100 else "{:.1f}" if p > 1 else "{:.5f}"
+                    alert.meta["vp_support"] = f"{sf}(量节点)"
+                if vp_nodes["resistance"]:
+                    p = vp_nodes["resistance"]["price"]
+                    sf = "{:.0f}" if p > 100 else "{:.1f}" if p > 1 else "{:.5f}"
+                    alert.meta["vp_resistance"] = f"{sf}(量节点)"
+        except Exception:
+            pass
+
     # ── 仓位计算: 保证金占比 = 入场价 × risk_pct / (SL距离 × leverage) × 100% ──
     try:
         with open("config.yaml") as f:
@@ -640,6 +663,25 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
             alert.severity = "critical"
             alert.details["setup"] = True
             check.append("✅成型·Pinbar")
+
+    # ── 出场精密度 ──
+    # 量能耗尽: 高量 + 小实体 → 无方向性跟随
+    body_pct_15 = ind_15m.get("body_pct", 1)
+    vr_15m = ind_15m.get("volume_ratio") or 1
+    if body_pct_15 < 0.3 and vr_15m >= 2.5:
+        check.append("⚠量能耗尽")
+
+    # ATR 移动止损建议（入场后价格有利移动 2ATR 时移损至保本）
+    if entry_price > 0 and atr > 0:
+        sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.5f}"
+        if alert.direction == "long":
+            move_price = entry_price + atr * 2
+            if tp > entry_price and move_price < tp:
+                alert.meta["trailing"] = f"移损@{sf.format(entry_price+atr*0.5)}(+2ATR移保本)"
+        elif alert.direction == "short":
+            move_price = entry_price - atr * 2
+            if tp < entry_price and move_price > tp:
+                alert.meta["trailing"] = f"移损@{sf.format(entry_price-atr*0.5)}(+2ATR移保本)"
 
     alert.checklist = check
 
