@@ -830,6 +830,8 @@ async def async_main():
                     filtered, ranks, len(alerts), len(symbols), scan_start)
                 feishu.send(report)
                 logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(ranks)} ranked")
+            else:
+                logger.info(f"Scan #{scan_count}: 0 push alerts (raw {len(alerts)} signals scanned)")
 
         except Exception as e:
             logger.error(f"Scan #{scan_count} error: {e}")

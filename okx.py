@@ -165,49 +165,63 @@ class OKXClient:
     # --- WebSocket ---
     async def ws_connect(self, symbols: list[str], timeframes: list[str],
                          on_kline: Callable, on_trade: Callable | None = None):
-        import websockets
+        self._symbols = symbols
+        self._timeframes = timeframes
+        self._on_kline = on_kline
+        self._on_trade = on_trade
         self._running = True
-        self._ws = await websockets.connect(
-            "wss://ws.okx.com:8443/ws/v5/business", ping_interval=30
-        )
-        logger.info("WebSocket connected")
+        self._ws = None
+        asyncio.create_task(self._read_loop())
 
-        # 订阅
-        for sym in symbols:
-            for tf in timeframes:
-                inst_id = sym.replace("/", "-").replace(":USDT", "-SWAP")
-                tf_okx = f"candle{tf.upper()}" if "H" in tf.upper() else f"candle{tf.lower()}"
-                await self._ws.send(json.dumps({
-                    "op": "subscribe",
-                    "args": [{"instId": inst_id, "channel": tf_okx}],
-                }))
-
-        # 读取循环
-        asyncio.create_task(self._read_loop(on_kline, on_trade))
-
-    async def _read_loop(self, on_kline: Callable, on_trade: Callable | None):
-        while self._running and self._ws:
+    async def _read_loop(self):
+        while self._running:
             try:
-                msg = await asyncio.wait_for(self._ws.recv(), timeout=60)
-                data = json.loads(msg)
-                arg = data.get("arg", {})
-                channel = arg.get("channel", "")
-                if channel.startswith("candle"):
-                    sym = self._parse_inst_id(arg.get("instId", ""))
-                    tf = channel.replace("candle", "").lower()
-                    for d in data.get("data", []):
-                        candle = Candle(
-                            timestamp=datetime.fromtimestamp(int(d[0]) / 1000),
-                            open=float(d[1]), high=float(d[2]),
-                            low=float(d[3]), close=float(d[4]), volume=float(d[5]),
-                        )
-                        on_kline(sym, tf, candle)
-            except asyncio.TimeoutError:
-                continue
+                import websockets
+                self._ws = await websockets.connect(
+                    "wss://ws.okx.com:8443/ws/v5/business", ping_interval=30
+                )
+                logger.info("WebSocket connected")
+
+                # 订阅
+                for sym in self._symbols:
+                    for tf in self._timeframes:
+                        inst_id = sym.replace("/", "-").replace(":USDT", "-SWAP")
+                        tf_okx = f"candle{tf.upper()}" if "H" in tf.upper() else f"candle{tf.lower()}"
+                        await self._ws.send(json.dumps({
+                            "op": "subscribe",
+                            "args": [{"instId": inst_id, "channel": tf_okx}],
+                        }))
+
+                # 读取消息
+                while self._running:
+                    try:
+                        msg = await asyncio.wait_for(self._ws.recv(), timeout=60)
+                        data = json.loads(msg)
+                        arg = data.get("arg", {})
+                        channel = arg.get("channel", "")
+                        if channel.startswith("candle"):
+                            sym = self._parse_inst_id(arg.get("instId", ""))
+                            tf = channel.replace("candle", "").lower()
+                            for d in data.get("data", []):
+                                candle = Candle(
+                                    timestamp=datetime.fromtimestamp(int(d[0]) / 1000),
+                                    open=float(d[1]), high=float(d[2]),
+                                    low=float(d[3]), close=float(d[4]), volume=float(d[5]),
+                                )
+                                self._on_kline(sym, tf, candle)
+                    except asyncio.TimeoutError:
+                        continue
             except Exception as e:
                 if self._running:
-                    logger.warning(f"WS read error: {e}")
-                break
+                    logger.warning(f"WS disconnected: {e}, reconnecting in 30s...")
+                await asyncio.sleep(30)
+            finally:
+                if self._ws:
+                    try:
+                        await self._ws.close()
+                    except Exception:
+                        pass
+                    self._ws = None
 
     def _parse_inst_id(self, inst_id: str) -> str:
         if inst_id.endswith("-USDT-SWAP"):
