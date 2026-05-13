@@ -19,19 +19,20 @@ def select_symbols(
     tf: str = "4h",
     lookback_bars: int = 60,
     min_structure_score: float = 0.3,
+    min_volume: float = 0,  # 24h最小成交量(USDT), 0=不过滤
 ) -> list[str]:
     """
     从 top N 币种中筛选出独立且结构清晰的标的。
-
-    pool_size: 初筛池大小
-    max_correlation: 两两相关性上限（超过则二选一）
-    tf: 用于计算相关性和结构的时间框架
-    lookback_bars: 回看 K 线根数
-    min_structure_score: 结构清晰度最低分
     """
     okx = OKXClient()
     all_symbols = okx.get_top_symbols(pool_size)
     logger.info(f"初筛池: {len(all_symbols)} 币")
+
+    # ── 第零步：成交量过滤 ──
+    if min_volume > 0:
+        volumes = okx.get_24h_volume(all_symbols)
+        all_symbols = [s for s in all_symbols if volumes.get(s, 0) >= min_volume]
+        logger.info(f"成交量过滤(≥{min_volume/1e6:.0f}M): {len(all_symbols)} 币")
 
     # ── 第一步：拉取最近 lookback_bars 根 tf K 线 ──
     candles: dict[str, list[dict]] = {}
@@ -120,8 +121,10 @@ def select_symbols(
         reverse=True,
     )
 
-    print(f"\n{'币种':<24s} {'结构分':>8s} {'活跃防线':>8s}")
-    print("-" * 44)
+    print(f"\n{'币种':<24s} {'成交量(M)':>10s} {'结构分':>8s} {'活跃防线':>8s}")
+    print("-" * 54)
+    # 获取成交量
+    volumes = okx.get_24h_volume([s for s, _ in final]) if final else {}
     for sym, score in final:
         active_count = sum(1 for l in find_swing_levels(
             pd.DataFrame([{
@@ -130,7 +133,8 @@ def select_symbols(
                 "volume": b["volume"],
             } for b in candles[sym]]), lookback=lookback_bars
         ) if l.touch_count >= 2)
-        print(f"{sym:<24s} {score:>8.4f} {active_count:>8}")
+        vol_m = volumes.get(sym, 0) / 1e6
+        print(f"{sym:<24s} {vol_m:>10.1f} {score:>8.4f} {active_count:>8}")
 
     result = [s for s, _ in final]
     print(f"\n推荐监控: {len(result)} 币 (从 {pool_size} 筛选)")
@@ -167,6 +171,7 @@ if __name__ == "__main__":
     p.add_argument("--tf", default="4h")
     p.add_argument("--bars", type=int, default=60)
     p.add_argument("--min-score", type=float, default=0.3)
+    p.add_argument("--min-volume", type=float, default=0, help="24h最小成交量(USDT), 如5000000=5M")
     p.add_argument("--write-config", action="store_true", help="直接写入 config.yaml")
     args = p.parse_args()
 
@@ -176,6 +181,7 @@ if __name__ == "__main__":
         tf=args.tf,
         lookback_bars=args.bars,
         min_structure_score=args.min_score,
+        min_volume=args.min_volume,
     )
 
     if args.write_config and result:

@@ -79,6 +79,19 @@ class OKXClient:
         ranked = sorted(swaps, key=lambda s: tickers.get(s, {}).get("quoteVolume", 0) or 0, reverse=True)
         return ranked[:n]
 
+    def get_24h_volume(self, symbols: list[str]) -> dict[str, float]:
+        """返回币种的 24h 估计成交量 (USDT), baseVolume × 现价"""
+        result = {}
+        for s in symbols:
+            try:
+                t = self._exchange.fetch_ticker(s)
+                base_vol = t.get("baseVolume", 0) or 0
+                price = t.get("last", 0) or 0
+                result[s] = base_vol * price
+            except Exception:
+                result[s] = 0
+        return result
+
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
         ohlcv = self._exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         return [{
