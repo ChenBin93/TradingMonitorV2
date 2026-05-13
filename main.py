@@ -271,8 +271,8 @@ def fmt_short_alert(a: Alert) -> str:
     r = m.get("resistance", "-")
     checks = " ".join([c for c in a.checklist if c.startswith("✓") or c.startswith("⚠")][:4])
     margin = m.get("margin", "")
-    role = a.tf_role
-    line = f"{severity_icon} {sym}[{a.timeframe}·{role}] {d} {a.name} RR:{rr} {margin}"
+    role = "/".join(getattr(a, "_merged_tfs", [a.timeframe]))
+    line = f"{severity_icon} {sym}[{role}] {d} {a.name} RR:{rr} {margin}"
     line2 = f"   S:{s} R:{r} | {checks}"
     return f"{line}\n{line2}"
 
@@ -306,18 +306,29 @@ def format_consolidated_report(
 
         quality.append(a)
 
+    # 合并同一币种+同信号+同方向 → 一行展示所有TF
     rank_order = {r.symbol: i for i, r in enumerate(ranks)}
-    quality.sort(key=lambda a: (rank_order.get(a.symbol, 999), -a.confidence))
+    merged: dict[str, list[Alert]] = {}
+    for a in quality:
+        key = f"{a.symbol}|{a.signal_type}|{a.direction}"
+        merged.setdefault(key, []).append(a)
+
+    merged_list = []
+    for key, alerts_in_group in merged.items():
+        best = max(alerts_in_group, key=lambda x: x.confidence)
+        best._merged_tfs = sorted(set(a.timeframe for a in alerts_in_group))
+        merged_list.append(best)
+    merged_list.sort(key=lambda a: (rank_order.get(a.symbol, 999), -a.confidence))
 
     longs = sum(1 for a in quality if a.direction == "long")
     shorts = sum(1 for a in quality if a.direction == "short")
 
     lines = [f"━━━ V2 扫描 {time_str} ━━━",
-             f"{symbol_count}币 | {total_alerts}信号 | 推送{len(quality)}条 | 多{longs}/空{shorts}"]
+             f"{symbol_count}币 | {total_alerts}信号 | 推送{len(merged_list)}条 | 多{longs}/空{shorts}"]
 
-    if quality:
+    if merged_list:
         lines.append("")
-        for a in quality[:8]:
+        for a in merged_list[:8]:
             lines.append(fmt_short_alert(a))
 
     if ranks:
@@ -330,10 +341,6 @@ def format_consolidated_report(
             lines.append(f"{i}. {sym} {d} {r.score:.0%} | {tags} | {reason}")
 
     return "\n".join(lines)
-    if quality:
-        lines.append("")
-        for i, a in enumerate(quality[:8]):
-            lines.append(fmt_short_alert(a))
 
     # ── TOP5 排名 ──
     if ranks:
