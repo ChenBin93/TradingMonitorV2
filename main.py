@@ -270,8 +270,11 @@ def fmt_short_alert(a: Alert) -> str:
     s = m.get("support", "-")
     r = m.get("resistance", "-")
     checks = " ".join([c for c in a.checklist if c.startswith("✓") or c.startswith("⚠")][:4])
+    margin = m.get("margin", "")
     role = a.tf_role
-    return f"{severity_icon} {sym}[{a.timeframe}·{role}] {d} {a.name} RR:{rr}\n   S:{s} R:{r} | {checks}"
+    line = f"{severity_icon} {sym}[{a.timeframe}·{role}] {d} {a.name} RR:{rr} {margin}"
+    line2 = f"   S:{s} R:{r} | {checks}"
+    return f"{line}\n{line2}"
 
 
 def format_consolidated_report(
@@ -513,6 +516,19 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
     tp_dist = abs(tp - entry_price)
     rr = tp_dist / sl_dist if sl_dist > 0 else 0
     alert.meta["rr"] = f"{rr:.1f}:1"
+
+    # ── 仓位计算: 保证金占比 = 入场价 × risk_pct / (SL距离 × leverage) × 100% ──
+    try:
+        with open("config.yaml") as f:
+            import yaml
+            acct = yaml.safe_load(f).get("account", {})
+        risk_pct = acct.get("risk_pct", 15)
+        leverage = acct.get("leverage", 10)
+        if sl_dist > 0:
+            margin_pct = entry_price * risk_pct / (sl_dist * leverage)
+            alert.meta["margin"] = f"{margin_pct:.1f}%本金"
+    except Exception:
+        pass
 
     if rr >= 2.0:
         check.append("✓盈亏比")

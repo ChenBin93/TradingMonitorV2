@@ -60,6 +60,11 @@ health:
 logging:
   level: INFO
   file: logs/main.log
+
+# --- 仓位计算 ---
+account:
+  risk_pct: 15          # 每笔风险占本金比例 (%)
+  leverage: 10          # 杠杠倍数
 watchlist:
 - COST/USDT:USDT
 - AMZN/USDT:USDT
