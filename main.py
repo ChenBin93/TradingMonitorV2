@@ -274,7 +274,10 @@ def fmt_short_alert(a: Alert) -> str:
     role = "/".join(getattr(a, "_merged_tfs", [a.timeframe]))
     line = f"{severity_icon} {sym}[{role}] {d} {a.name} RR:{rr} {margin}"
     line2 = f"   S:{s} R:{r} | {checks}"
-    return f"{line}\n{line2}"
+    opt_entry = m.get("opt_entry", "")
+    opt_rr = m.get("opt_rr", "")
+    opt_line = f"\n   最优: {opt_entry}→RR:{opt_rr}" if opt_entry and opt_rr else ""
+    return f"{line}\n{line2}{opt_line}"
 
 
 def format_consolidated_report(
@@ -519,6 +522,49 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
     tp_dist = abs(tp - entry_price)
     rr = tp_dist / sl_dist if sl_dist > 0 else 0
     alert.meta["rr"] = f"{rr:.1f}:1"
+
+    # ── 最优入场（防线价）计算 ──
+    # 如果在防线位置入场，RR 有多大？距当前价 ≤2ATR 才显示。
+    if entry_price > 0 and atr > 0:
+        opt_entry_price = None
+        opt_rr_val = 0
+        touches = 0
+        if alert.direction == "long" and "support" in sr_info:
+            support_lvl = sr_info["support"]
+            touches = support_lvl.touch_count
+            opt_entry_price = support_lvl.price
+            if opt_entry_price < entry_price:
+                opt_sl = opt_entry_price - atr * 0.3
+                resistance_lvl = sr_info.get("resistance")
+                opt_tp = resistance_lvl.price if resistance_lvl else opt_entry_price + atr * 3.0
+                if opt_tp > opt_entry_price and opt_sl < opt_entry_price:
+                    opt_sl_dist = opt_entry_price - opt_sl
+                    opt_tp_dist = opt_tp - opt_entry_price
+                    opt_rr_val = opt_tp_dist / opt_sl_dist if opt_sl_dist > 0 else 0
+        elif alert.direction == "short" and "resistance" in sr_info:
+            resistance_lvl = sr_info["resistance"]
+            touches = resistance_lvl.touch_count
+            opt_entry_price = resistance_lvl.price
+            if opt_entry_price > entry_price:
+                opt_sl = opt_entry_price + atr * 0.3
+                support_lvl = sr_info.get("support")
+                opt_tp = support_lvl.price if support_lvl else opt_entry_price - atr * 3.0
+                if opt_tp < opt_entry_price and opt_sl > opt_entry_price:
+                    opt_sl_dist = opt_sl - opt_entry_price
+                    opt_tp_dist = opt_entry_price - opt_tp
+                    opt_rr_val = opt_tp_dist / opt_sl_dist if opt_sl_dist > 0 else 0
+
+        if (opt_entry_price and abs(opt_entry_price - entry_price) <= atr * 2
+                and opt_rr_val > rr and opt_rr_val >= 2.0):
+            sf_opt = "{:.0f}" if opt_entry_price > 100 else "{:.1f}" if opt_entry_price > 1 else "{:.5f}"
+            alert.meta["opt_entry"] = sf_opt.format(opt_entry_price)
+            alert.meta["opt_rr"] = f"{opt_rr_val:.1f}:1"
+            if touches >= 3:
+                check.append("🔵左侧挂单")
+            elif touches >= 2:
+                check.append("🟡右侧等K@防线")
+            else:
+                check.append("⚠防线弱·RR高")
 
     # ── 仓位计算: 保证金占比 = 入场价 × risk_pct / (SL距离 × leverage) × 100% ──
     try:
