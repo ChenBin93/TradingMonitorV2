@@ -463,11 +463,11 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
 
         if support:
             p = support.price
-            sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.2f}"
+            sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
             alert.meta["support"] = f"{sf}({support.strength},{support.touch_count}触)"
         if resistance:
             p = resistance.price
-            sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.2f}"
+            sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
             alert.meta["resistance"] = f"{sf}({resistance.strength},{resistance.touch_count}触)"
             sr_info["resistance"] = resistance
 
@@ -511,7 +511,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
         sl = entry_price - atr * 1.5
         tp = entry_price + atr * 1.5
 
-    sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.2f}"
+    sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.5f}"
     alert.meta["sl"] = sf.format(sl)
     alert.meta["tp"] = sf.format(tp)
     sl_dist = abs(entry_price - sl)

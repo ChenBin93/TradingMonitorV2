@@ -67,7 +67,7 @@ def find_swing_levels(df: pd.DataFrame, lookback: int = 50) -> list[Level]:
                 elif avg_price > 1:
                     price = round(avg_price, 1)
                 else:
-                    price = round(avg_price, 2)
+                    price = round(avg_price, 5)
                 levels.append(Level(
                     price=price,
                     touch_count=len(cluster),
