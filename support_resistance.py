@@ -58,11 +58,18 @@ def find_swing_levels(df: pd.DataFrame, lookback: int = 50) -> list[Level]:
 
         for cluster in clusters:
             if len(cluster) >= 2:  # 至少触及 2 次
-                avg_price = float(np.mean([p for _, p in cluster]))
+                avg_price = float(np.median([p for _, p in cluster]))
                 last_idx = max(idx for idx, _ in cluster)
                 strength = "强" if len(cluster) >= 3 else "中"
+                # 根据价格量级四舍五入：>100 → 整数, >1 → 1位小数, 其余2位
+                if avg_price > 100:
+                    price = round(avg_price)
+                elif avg_price > 1:
+                    price = round(avg_price, 1)
+                else:
+                    price = round(avg_price, 2)
                 levels.append(Level(
-                    price=round(avg_price, 4),
+                    price=price,
                     touch_count=len(cluster),
                     side=side,
                     strength=strength,

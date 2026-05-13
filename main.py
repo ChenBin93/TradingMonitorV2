@@ -462,10 +462,13 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
         support, resistance = get_nearest_levels(levels, current_price)
 
         if support:
-            alert.meta["support"] = f"{support.price:.0f}({support.strength},{support.touch_count}触)"
-            sr_info["support"] = support
+            p = support.price
+            sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.2f}"
+            alert.meta["support"] = f"{sf}({support.strength},{support.touch_count}触)"
         if resistance:
-            alert.meta["resistance"] = f"{resistance.price:.0f}({resistance.strength},{resistance.touch_count}触)"
+            p = resistance.price
+            sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.2f}"
+            alert.meta["resistance"] = f"{sf}({resistance.strength},{resistance.touch_count}触)"
             sr_info["resistance"] = resistance
 
         # 位置
@@ -508,8 +511,9 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
         sl = entry_price - atr * 1.5
         tp = entry_price + atr * 1.5
 
-    alert.meta["sl"] = f"{sl:.0f}"
-    alert.meta["tp"] = f"{tp:.0f}"
+    sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.2f}"
+    alert.meta["sl"] = sf.format(sl)
+    alert.meta["tp"] = sf.format(tp)
     sl_dist = abs(entry_price - sl)
     tp_dist = abs(tp - entry_price)
     rr = tp_dist / sl_dist if sl_dist > 0 else 0
