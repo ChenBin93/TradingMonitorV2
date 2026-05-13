@@ -465,6 +465,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
             p = support.price
             sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
             alert.meta["support"] = f"{sf}({support.strength},{support.touch_count}触)"
+            sr_info["support"] = support
         if resistance:
             p = resistance.price
             sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
@@ -577,6 +578,22 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
                 alert.severity = "critical"
                 alert.details["stage2_upgrade"] = "range"
                 check.append("🟢震荡回归")
+
+    # ── 成型判定: Pinbar @ S/R + 放量 → 可入场信号 ──
+    pinbar_15 = ind_15m.get("pinbar")
+    if pinbar_15 and current_price and atr and vr:
+        near_sr = False
+        if alert.direction == "long" and pinbar_15 == "bullish" and "support" in sr_info:
+            dist = current_price - sr_info["support"].price
+            near_sr = 0 <= dist <= atr
+        elif alert.direction == "short" and pinbar_15 == "bearish" and "resistance" in sr_info:
+            dist = sr_info["resistance"].price - current_price
+            near_sr = 0 <= dist <= atr
+
+        if near_sr and vr >= 1.2:
+            alert.severity = "critical"
+            alert.details["setup"] = True
+            check.append("✅成型·Pinbar")
 
     alert.checklist = check
 

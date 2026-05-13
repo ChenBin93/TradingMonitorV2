@@ -46,6 +46,24 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
     # 布林带宽度短期百分位 (最近 20 根 K 线内)
     bb_short_pct = _local_percentile(bb_width, lookback=20)
 
+    # K线实体与形态
+    o, h, l, c = df["open"].iloc[idx], df["high"].iloc[idx], df["low"].iloc[idx], df["close"].iloc[idx]
+    body_top = max(o, c)
+    body_bottom = min(o, c)
+    body = body_top - body_bottom
+    total_range = h - l
+    body_pct = body / total_range if total_range > 0 else 0
+    body_dir = "bullish" if c > o else "bearish" if c < o else "neutral"
+
+    lower_wick = body_bottom - l
+    upper_wick = h - body_top
+    pinbar = None
+    if total_range > 0:
+        if lower_wick >= total_range * 0.6 and upper_wick <= total_range * 0.2:
+            pinbar = "bullish"
+        elif upper_wick >= total_range * 0.6 and lower_wick <= total_range * 0.2:
+            pinbar = "bearish"
+
     return {
         "close": v(df["close"]), "roc": v(roc), "rsi": v(rsi), "adx": v(adx),
         "plus_di": v(plus_di), "minus_di": v(minus_di),
@@ -61,6 +79,9 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
         "price_vs_ma60": "above" if v(df["close"]) and v(ma60) and v(df["close"]) > v(ma60) else "below",
         "compression_bars": _count_compression_bars(df),
         "adx_trend": "up" if len(adx) > 5 and adx.iloc[-1] > adx.iloc[-5] else "down",
+        "pinbar": pinbar,
+        "body_pct": body_pct,
+        "body_dir": body_dir,
         "df": df,
     }
 
