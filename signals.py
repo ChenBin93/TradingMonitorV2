@@ -334,20 +334,31 @@ class EntrySignal:
 
 
 def check_stage2_entry(tf_data: dict[str, dict]) -> EntrySignal | None:
-    """检查 Stage2 入场信号（跨时间框架）"""
+    """检查 Stage2 入场信号（跨时间框架，包含 4h 方向过滤）"""
     ind_15m = tf_data.get("15m", {})
     ind_1h = tf_data.get("1h", {})
+    ind_4h = tf_data.get("4h", {})
     if not ind_15m:
         return None
+
+    # 4h 方向过滤
+    dir_4h = (ind_4h or {}).get("ma_alignment", "neutral") if ind_4h else "neutral"
 
     # 趋势突破
     trend = _check_trend_breakout(ind_15m, ind_1h or ind_15m)
     if trend:
+        # 4h 方向不一致 → 降级为不推送（只返回高胜率信号）
+        if (trend.direction == "long" and dir_4h == "bearish") or \
+           (trend.direction == "short" and dir_4h == "bullish"):
+            return None
         return trend
 
     # 震荡回归
     reversion = _check_range_reversion(ind_15m, ind_1h or ind_15m)
     if reversion:
+        if (reversion.direction == "long" and dir_4h == "bearish") or \
+           (reversion.direction == "short" and dir_4h == "bullish"):
+            return None
         return reversion
 
     return None
