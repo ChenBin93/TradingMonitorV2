@@ -526,7 +526,11 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
         leverage = acct.get("leverage", 10)
         if sl_dist > 0:
             margin_pct = entry_price * risk_pct / (sl_dist * leverage)
-            alert.meta["margin"] = f"{margin_pct:.1f}%本金"
+            if margin_pct <= 100:
+                alert.meta["margin"] = f"保证金{margin_pct:.0f}%({leverage}x)"
+            else:
+                need_lev = int(margin_pct * leverage / 100) + 1
+                alert.meta["margin"] = f"保证金{margin_pct:.0f}%({leverage}x)→需{need_lev}x"
     except Exception:
         pass
 
