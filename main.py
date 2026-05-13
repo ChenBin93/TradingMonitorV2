@@ -13,7 +13,7 @@ from loguru import logger
 
 from okx import OKXClient, KlineCache, Candle
 from indicators import compute as compute_indicators
-from signals import SIGNALS, SignalState, get_direction, get_regime, check_stage2_entry, EntrySignal
+from signals import SIGNALS, SignalState, get_direction, get_regime
 from notify import Feishu
 from utils import setup_logging, start_health_server
 from support_resistance import find_swing_levels, get_nearest_levels
@@ -265,7 +265,7 @@ def fmt_short_alert(a: Alert) -> str:
     dir_map = {"long": "多", "short": "空"}
     d = dir_map.get(a.direction, "")
     m = a.meta
-    severity_icon = "🔴" if a.severity == "critical" else "🟠"
+    severity_icon = "🟢" if a.details.get("stage2_upgrade") else ("🔴" if a.severity == "critical" else "🟠")
     rr = m.get("rr", "-")
     s = m.get("support", "-")
     r = m.get("resistance", "-")
@@ -280,16 +280,14 @@ def fmt_short_alert(a: Alert) -> str:
 def format_consolidated_report(
     filtered: list[Alert],
     ranks: list[SymbolRank],
-    stage2: list[EntrySignal],
     total_alerts: int,
     symbol_count: int,
     scan_time: datetime,
 ) -> str:
-    """合并预警 + 排名 + Stage2 为一条消息"""
+    """合并预警 + 排名为一条消息"""
     time_str = scan_time.strftime("%H:%M")
 
-    # 低质量过滤：RR < 1.5 且非 critical 的不推
-    # 中间位置 + 无MTF确认 → 降级（回测胜率仅 35%）
+    # 低质量过滤
     quality = []
     for a in filtered:
         rr_str = a.meta.get("rr", "0:1").split(":")[0]
@@ -298,11 +296,9 @@ def format_consolidated_report(
         except ValueError:
             rr_val = 0
 
-        # RR 硬门槛
         if rr_val < 1.5 and a.severity != "critical":
             continue
 
-        # 中间位置 + 无 MTF → 只保留 critical
         mtf_boost = a.details.get("mtf_boost", False)
         is_mid = any(c.startswith("?") for c in a.checklist if "边界" in c or "支撑" in c or "阻力" in c)
         if is_mid and not mtf_boost and a.severity != "critical":
@@ -310,45 +306,30 @@ def format_consolidated_report(
 
         quality.append(a)
 
-    # 按排名顺序对齐
     rank_order = {r.symbol: i for i, r in enumerate(ranks)}
     quality.sort(key=lambda a: (rank_order.get(a.symbol, 999), -a.confidence))
 
-    # 多空统计
     longs = sum(1 for a in quality if a.direction == "long")
     shorts = sum(1 for a in quality if a.direction == "short")
 
     lines = [f"━━━ V2 扫描 {time_str} ━━━",
              f"{symbol_count}币 | {total_alerts}信号 | 推送{len(quality)}条 | 多{longs}/空{shorts}"]
 
-    # ── Stage2 入场 (稀有，放最前面) ──
-    if stage2:
+    if quality:
         lines.append("")
-        for e in stage2[:3]:
-            sym = e.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
-            dir_text = "多" if e.direction == "long" else "空"
-            sig_type = "趋势突破" if "trend" in e.signal_type else "震荡回归"
-            # Stage2 仓位计算
-            sl_dist = abs(e.entry_price - e.stop_loss)
-            margin_info = ""
-            try:
-                import yaml
-                with open("config.yaml") as f:
-                    acct = yaml.safe_load(f).get("account", {})
-                risk_pct = acct.get("risk_pct", 15)
-                leverage = acct.get("leverage", 10)
-                if sl_dist > 0:
-                    margin_pct = e.entry_price * risk_pct / (sl_dist * leverage)
-                    if margin_pct <= 100:
-                        margin_info = f"仓位{margin_pct:.0f}%({leverage}x)"
-                    else:
-                        need_lev = int(margin_pct * leverage / 100) + 1
-                        margin_info = f"仓位{margin_pct:.0f}%({leverage}x)→需{need_lev}x"
-            except Exception:
-                pass
-            lines.append(f"🟢 {sym} Stage2 {sig_type}{dir_text} 入场:{e.entry_price} SL:{e.stop_loss} TP:{e.take_profit} RR:{e.risk_reward}:1 {margin_info}")
+        for a in quality[:8]:
+            lines.append(fmt_short_alert(a))
 
-    # ── 预警列表 ──
+    if ranks:
+        lines.append(f"\n━━━ TOP{min(5, len(ranks))} ━━━")
+        for i, r in enumerate(ranks[:5], 1):
+            sym = r.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
+            d = {"long": "多", "short": "空"}.get(r.direction, "")
+            tags = "/".join(r.signal_tags[:3])
+            reason = "/".join(r.reasons[:2])
+            lines.append(f"{i}. {sym} {d} {r.score:.0%} | {tags} | {reason}")
+
+    return "\n".join(lines)
     if quality:
         lines.append("")
         for i, a in enumerate(quality[:8]):
@@ -383,12 +364,11 @@ def do_scan(
     symbols: list[str],
     cache: KlineCache,
     config: dict,
-) -> tuple[list[Alert], dict[str, dict[str, dict]], list[EntrySignal]]:
-    """返回: (alerts, {sym: {tf: ind}}, stage2_entries)"""
+) -> tuple[list[Alert], dict[str, dict[str, dict]]]:
+    """返回: (alerts, {sym: {tf: ind}})"""
     timeframes = config["timeframes"]
     alerts: list[Alert] = []
     all_ind: dict[str, dict[str, dict]] = {}
-    stage2_entries: list[EntrySignal] = []
 
     for sym in symbols:
         tf_ind: dict[str, dict] = {}
@@ -438,14 +418,7 @@ def do_scan(
         for alert in sym_alerts:
             _enrich_alert(alert, tf_ind, sym)
 
-        # Stage2 入场
-        if "15m" in tf_ind:
-            entry = check_stage2_entry(tf_ind)
-            if entry:
-                entry.symbol = sym
-                stage2_entries.append(entry)
-
-    return alerts, all_ind, stage2_entries
+    return alerts, all_ind
 
 
 def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
@@ -570,6 +543,30 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
     if vr >= 1.5:
         check.append(f"✓放量{vr:.1f}x")
 
+    # ── Stage2 升级: 近边界 + 趋势/回归组合满足 → 🟢 标注 ──
+    ind_15m = tf_ind.get("15m", {})
+    is_near_boundary = any(c.startswith("✓") for c in check if "支撑" in c or "阻力" in c)
+    if is_near_boundary and ind_15m:
+        adx_15 = ind_15m.get("adx", 0) or 0
+        adx_1h = (tf_ind.get("1h") or {}).get("adx", 0) or 0
+        roc_15 = ind_15m.get("roc") or 0
+        rsi_15 = ind_15m.get("rsi")
+        vr_15 = ind_15m.get("volume_ratio") or 1
+
+        # 趋势突破升级
+        if adx_15 >= 25 and adx_1h >= 20 and abs(roc_15) >= 1.0 and vr_15 >= 1.5:
+            if (alert.direction == "long" and roc_15 > 0) or (alert.direction == "short" and roc_15 < 0):
+                alert.severity = "critical"
+                alert.details["stage2_upgrade"] = "trend"
+                check.append("🟢趋势突破")
+
+        # 震荡回归升级
+        elif adx_15 < 20 and rsi_15 is not None:
+            if (alert.direction == "long" and rsi_15 <= 30) or (alert.direction == "short" and rsi_15 >= 70):
+                alert.severity = "critical"
+                alert.details["stage2_upgrade"] = "range"
+                check.append("🟢震荡回归")
+
     alert.checklist = check
 
 
@@ -592,19 +589,6 @@ def apply_mtf_boost(alerts: list[Alert]):
                     a.details["mtf_boost"] = True
                     a.details["mtf_timeframes"] = list(tfs)
 
-
-def format_stage2_report(entries: list[EntrySignal], scan_time: datetime) -> str:
-    if not entries:
-        return ""
-    time_str = scan_time.strftime("%Y-%m-%d %H:%M")
-    lines = [f"\n[Stage2入场] {time_str}"]
-    for e in entries[:5]:
-        sym = e.symbol.replace("-USDT-SWAP", "/USDT")
-        dir_text = "做多" if e.direction == "long" else "做空"
-        sig_type = "趋势突破" if "trend" in e.signal_type else "震荡回归"
-        lines.append(f"  {sym} {sig_type}{dir_text} 入场:{e.entry_price} 止损:{e.stop_loss} 止盈:{e.take_profit} RR:{e.risk_reward}:1")
-        lines.append(f"  {e.evidence}")
-    return "\n".join(lines)
 
 
 # =============================================================================
@@ -702,28 +686,15 @@ async def async_main():
         min_confidence=config.get("alert", {}).get("min_confidence", 0.65),
     )
     scan_count = 0
-    _stage2_last: dict[str, datetime] = {}  # Stage2 去重
 
     while True:
         await asyncio.sleep(interval)
         scan_count += 1
         scan_start = datetime.now()
         try:
-            alerts, all_ind, stage2 = do_scan(symbols, cache, config)
+            alerts, all_ind = do_scan(symbols, cache, config)
 
-            # Stage2 去重: 同 symbol+signal_type 60分钟内只推一次
-            stage2_deduped = []
-            now = datetime.now()
-            for e in stage2:
-                key = f"{e.symbol}_{e.signal_type}"
-                last = _stage2_last.get(key)
-                if last and (now - last).total_seconds() < 3600:
-                    continue
-                _stage2_last[key] = now
-                stage2_deduped.append(e)
-            stage2 = stage2_deduped
-
-            # 多时间框架确认：同 signal 在多 TF 出现 → 置信度提升
+            # 多时间框架确认
             apply_mtf_boost(alerts)
 
             # 置信度增强
@@ -738,11 +709,11 @@ async def async_main():
             ranks = rank_symbols(alerts, all_ind) if filtered else []
 
             # 合并推送
-            if filtered or stage2:
+            if filtered:
                 report = format_consolidated_report(
-                    filtered, ranks, stage2, len(alerts), len(symbols), scan_start)
+                    filtered, ranks, len(alerts), len(symbols), scan_start)
                 feishu.send(report)
-                logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(ranks)} ranked, {len(stage2)} stage2")
+                logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(ranks)} ranked")
 
         except Exception as e:
             logger.error(f"Scan #{scan_count} error: {e}")
