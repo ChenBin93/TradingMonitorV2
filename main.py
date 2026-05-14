@@ -470,6 +470,12 @@ def do_scan(
                                 bbw_rank=ind.get("bb_width_short_pct"), regime=regime, direction=direction)
 
             for sig_def in SIGNALS:
+                # ── 市场状态门控 ──
+                adx_val = ind.get("adx", 0) or 0
+                if sig_def.gate == "trend" and adx_val < 25:
+                    continue
+                if sig_def.gate == "range" and adx_val >= 20:
+                    continue
                 try:
                     state.params = sig_def.params
                     result = sig_def.check(state)
@@ -490,14 +496,26 @@ def do_scan(
         # ── 第三遍：所有 TF 数据齐全，统一 enrich ──
         sym_alerts = [a for a in alerts if a.symbol == sym]
         for alert in sym_alerts:
-            _enrich_alert(alert, tf_ind, sym)
+            _enrich_alert(alert, tf_ind, sym, sym_alerts)
 
     return alerts, all_ind
 
 
-def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
+def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] | None = None):
     """为 alert 附加 4h 方向 + 1h S/R + SL/TP/RR + 清单"""
     check = []
+
+    # ── 信号共振加权 ──
+    if sym_alerts:
+        same_tf_dir = [a for a in sym_alerts
+                       if a.timeframe == alert.timeframe
+                       and a.direction == alert.direction
+                       and a.signal_type != alert.signal_type]
+        if len(same_tf_dir) >= 2:
+            alert.confidence = min(alert.confidence * 1.15, 1.0)
+            check.append(f"✓共振{len(same_tf_dir)+1}信")
+        elif len(same_tf_dir) >= 1:
+            alert.confidence = min(alert.confidence * 1.08, 1.0)
 
     # ── 4h 方向信息 ──
     ind_4h = tf_ind.get("4h")

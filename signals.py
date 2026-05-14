@@ -25,6 +25,7 @@ class SignalDef:
     check: Callable
     params: dict
     tag: str = ""
+    gate: str = "any"  # "trend"(ADX≥25)/"range"(ADX<20)/"any"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -276,25 +277,25 @@ def _check_price_extreme(state: SignalState) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════════
 
 SIGNALS: list[SignalDef] = [
-    # 波动收敛（左侧）
-    SignalDef("bb_squeeze",        "BB压缩",     _check_bb_squeeze,        {"threshold": 25}, "BB"),
-    SignalDef("ma_converge",       "MA汇聚",     _check_ma_converge,       {"threshold": 0.5}, "MA"),
-    SignalDef("ttm_squeeze",       "TTM压缩",    _check_ttm_squeeze,       {"min_bars": 5}, "TTM"),
-    SignalDef("compression_combo", "多重压缩",   _check_compression_combo, {}, "压"),
-    # RSI / 极端
-    SignalDef("rsi_extreme",       "RSI极值",    _check_rsi_extreme,       {"oversold": 25, "overbot": 75}, "RSI"),
-    SignalDef("price_extreme",     "价格极值",   _check_price_extreme,     {"std_threshold": 3.0}, "极"),
-    # 趋势确认（右侧）
-    SignalDef("ma_alignment",      "均线排列",   _check_ma_alignment,      {"adx_min": 25}, "MA排"),
-    SignalDef("adx_surge",         "ADX突破",    _check_adx_surge,         {"trend_threshold": 25}, "ADX"),
-    SignalDef("macd_cross",        "MACD交叉",   _check_macd_cross,        {}, "MACD"),
-    # 成交量
-    SignalDef("volume_spike",      "放量信号",   _check_volume_spike,      {"threshold": 3.0, "min_price_change": 0.3}, "VOL"),
-    # 背离
-    SignalDef("rsi_divergence",    "RSI背离",    _check_rsi_divergence,    {}, "RSI背"),
-    SignalDef("macd_divergence",   "MACD背离",   _check_macd_divergence,   {}, "MACD背"),
-    # 波动突变
-    SignalDef("atr_expansion",     "波动爆发",   _check_atr_expansion,     {"threshold": 1.8}, "ATR"),
+    # 波动收敛（左侧）— 任意状态
+    SignalDef("bb_squeeze",        "BB压缩",     _check_bb_squeeze,        {"threshold": 25}, "BB", "any"),
+    SignalDef("ma_converge",       "MA汇聚",     _check_ma_converge,       {"threshold": 0.5}, "MA", "range"),
+    SignalDef("ttm_squeeze",       "TTM压缩",    _check_ttm_squeeze,       {"min_bars": 5}, "TTM", "any"),
+    SignalDef("compression_combo", "多重压缩",   _check_compression_combo, {}, "压", "any"),
+    # RSI / 极端 — 逆势信号，仅在非强趋势
+    SignalDef("rsi_extreme",       "RSI极值",    _check_rsi_extreme,       {"oversold": 25, "overbot": 75}, "RSI", "range"),
+    SignalDef("price_extreme",     "价格极值",   _check_price_extreme,     {"std_threshold": 3.0}, "极", "any"),
+    # 趋势确认（右侧）— 仅在趋势
+    SignalDef("ma_alignment",      "均线排列",   _check_ma_alignment,      {"adx_min": 25}, "MA排", "trend"),
+    SignalDef("adx_surge",         "ADX突破",    _check_adx_surge,         {"trend_threshold": 25}, "ADX", "trend"),
+    SignalDef("macd_cross",        "MACD交叉",   _check_macd_cross,        {}, "MACD", "any"),
+    # 成交量 — 任意状态
+    SignalDef("volume_spike",      "放量信号",   _check_volume_spike,      {"threshold": 3.0, "min_price_change": 0.3}, "VOL", "any"),
+    # 背离 — 逆势信号，仅在非强趋势
+    SignalDef("rsi_divergence",    "RSI背离",    _check_rsi_divergence,    {}, "RSI背", "range"),
+    SignalDef("macd_divergence",   "MACD背离",   _check_macd_divergence,   {}, "MACD背", "range"),
+    # 波动突变 — 任意状态
+    SignalDef("atr_expansion",     "波动爆发",   _check_atr_expansion,     {"threshold": 1.8}, "ATR", "any"),
 ]
 
 
