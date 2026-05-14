@@ -315,6 +315,15 @@ def fmt_short_alert(a: Alert) -> str:
     m = a.meta
     severity_icon = "🟢" if a.details.get("stage2_upgrade") else ("🔴" if a.severity == "critical" else "🟠")
     rr = m.get("rr", "-")
+    opt_rr_raw = m.get("opt_rr", "")
+    if opt_rr_raw:
+        try:
+            opt_val = float(opt_rr_raw.split(":")[0])
+            cur_val = float(rr.split(":")[0]) if rr != "-" else 0
+            if opt_val > cur_val:
+                rr = opt_rr_raw  # 使用最优入场 RR
+        except ValueError:
+            pass
     s = m.get("support", "-")
     r = m.get("resistance", "-")
     checks = " ".join([c for c in a.checklist if c.startswith("✓") or c.startswith("⚠")][:4])
@@ -354,17 +363,22 @@ def format_consolidated_report(
         except ValueError:
             rr_val = 0
 
-        if rr_val < 1.5 and a.severity != "critical":
+        if rr_val < 1.5:
             continue
 
         mtf_boost = a.details.get("mtf_boost", False)
         is_mid = any(c.startswith("?") for c in a.checklist if "边界" in c or "支撑" in c or "阻力" in c)
-        if is_mid and not mtf_boost and a.severity != "critical":
+        if is_mid and not mtf_boost:
             continue
 
-        # 方向冲突：非 critical 信号 + 高 TF 方向不一致 → 丢弃
+        # 方向冲突：高 TF 方向不一致 → 丢弃
         has_dir_fail = any(c == "✗方向" for c in a.checklist)
-        if has_dir_fail and a.severity != "critical":
+        if has_dir_fail:
+            continue
+
+        # 位置-方向冲突：做多在阻力附近 / 做空在支撑附近 → 丢弃
+        has_pos_fail = any(c == "✗位置" for c in a.checklist)
+        if has_pos_fail:
             continue
 
         # 美股非交易时段过滤：代币化美股在休市期流动性极低，假信号多
@@ -576,14 +590,18 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         if support and resistance and resistance.price > support.price:
             pos_in_range = (current_price - support.price) / (resistance.price - support.price)
         if alert.direction == "long" and support:
-            if pos_in_range is not None and pos_in_range <= 0.3:
+            if pos_in_range is not None and pos_in_range >= 0.7:
+                check.append("✗位置")  # 做多但价格在阻力附近
+            elif pos_in_range is not None and pos_in_range <= 0.3:
                 check.append("✓近支撑")
             elif support.touch_count >= 2:
                 check.append("✓有支撑")
             else:
                 check.append("?无支撑")
         elif alert.direction == "short" and resistance:
-            if pos_in_range is not None and pos_in_range >= 0.7:
+            if pos_in_range is not None and pos_in_range <= 0.3:
+                check.append("✗位置")  # 做空但价格在支撑附近
+            elif pos_in_range is not None and pos_in_range >= 0.7:
                 check.append("✓近阻力")
             elif resistance.touch_count >= 2:
                 check.append("✓有阻力")
@@ -599,13 +617,13 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     if alert.direction == "long":
         sl = sr_info["support"].price - atr * 0.3 if "support" in sr_info else entry_price - atr * 1.5
         tp = sr_info["resistance"].price if "resistance" in sr_info else entry_price + atr * 2.5
-        # 确保 tp > sl
-        if tp <= sl or tp <= entry_price:
+        # 确保 tp 足够远
+        if tp <= sl or tp <= entry_price or (tp - entry_price) < (entry_price - sl) * 1.5:
             tp = entry_price + atr * 2.5
     elif alert.direction == "short":
         sl = sr_info["resistance"].price + atr * 0.3 if "resistance" in sr_info else entry_price + atr * 1.5
         tp = sr_info["support"].price if "support" in sr_info else entry_price - atr * 2.5
-        if tp >= sl or tp >= entry_price:
+        if tp >= sl or tp >= entry_price or (entry_price - tp) < (sl - entry_price) * 1.5:
             tp = entry_price - atr * 2.5
     else:
         sl = entry_price - atr * 1.5
