@@ -550,10 +550,10 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
 
     # ── 最优入场（防线价）计算 ──
     # 如果在防线位置入场，RR 有多大？距当前价 ≤2ATR 才显示。
+    opt_entry_price = None
+    opt_rr_val = 0
+    touches = 0
     if entry_price > 0 and atr > 0:
-        opt_entry_price = None
-        opt_rr_val = 0
-        touches = 0
         if alert.direction == "long" and "support" in sr_info:
             support_lvl = sr_info["support"]
             touches = support_lvl.touch_count
@@ -605,6 +605,29 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str):
                     p = vp_nodes["resistance"]["price"]
                     sp = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
                     alert.meta["vp_resistance"] = f"{sp}(量节点)"
+
+                # ── 动态防线升级: 2触极点 + 量节点重合 → 等效3触 ──
+                if touches == 2 and opt_entry_price:
+                    upgraded = False
+                    if alert.direction == "long" and "support" in sr_info:
+                        if vp_nodes["support"]:
+                            dist = abs(vp_nodes["support"]["price"] - sr_info["support"].price)
+                            if dist <= atr * 0.5:
+                                # 2触极点 + 量节点在附近 → 升级为左侧挂单
+                                if "🟡右侧等K@防线" in check:
+                                    check.remove("🟡右侧等K@防线")
+                                check.append("🔵左侧挂单(量升级)")
+                                upgraded = True
+                    elif alert.direction == "short" and "resistance" in sr_info:
+                        if vp_nodes["resistance"]:
+                            dist = abs(vp_nodes["resistance"]["price"] - sr_info["resistance"].price)
+                            if dist <= atr * 0.5:
+                                if "🟡右侧等K@防线" in check:
+                                    check.remove("🟡右侧等K@防线")
+                                check.append("🔵左侧挂单(量升级)")
+                                upgraded = True
+                    if upgraded:
+                        alert.details["vp_upgrade"] = True
         except Exception:
             pass
 
