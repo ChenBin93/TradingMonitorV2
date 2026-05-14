@@ -272,6 +272,144 @@ def _check_price_extreme(state: SignalState) -> dict | None:
                 "evidence": f"价格{where} Z={zscore:.1f}σ"}
 
 
+# --- 防线突破 / 假突破 / 回踩 ---
+
+def _check_breakout(state: SignalState) -> dict | None:
+    """防线放量突破：实体穿过防线 + 放量 → 趋势启动"""
+    df = state.ind.get("df")
+    close = state.ind.get("close")
+    atr = state.ind.get("atr") or 1
+    vr = state.ind.get("volume_ratio") or 1
+    if df is None or len(df) < 20 or not close:
+        return None
+
+    from support_resistance import find_swing_levels
+    levels = find_swing_levels(df, lookback=50)
+    idx = len(df) - 1
+    o = df["open"].iloc[idx]
+
+    for lvl in levels:
+        if lvl.touch_count < 2:
+            continue
+        body_penetration = 0.0
+        direction = None
+        if lvl.side == "resistance" and close > lvl.price:
+            body_penetration = min(close, max(o, lvl.price)) - lvl.price
+            direction = "long"
+        elif lvl.side == "support" and close < lvl.price:
+            body_penetration = lvl.price - max(close, min(o, lvl.price))
+            direction = "short"
+        if direction and body_penetration >= atr * 0.3 and vr >= 2.0:
+            from defense_state import get_defense_state
+            get_defense_state().record_break(
+                state.symbol, lvl.price, lvl.side,
+                "up" if direction == "long" else "down"
+            )
+            return {
+                "direction": direction,
+                "severity": "high",
+                "confidence": 0.7 if vr >= 3 else 0.6,
+                "evidence": f"突破{lvl.price:.5g}({lvl.side}) 量{vr:.1f}x",
+                "break_price": lvl.price,
+                "break_side": lvl.side,
+            }
+    return None
+
+
+def _check_fakeout(state: SignalState) -> dict | None:
+    """假突破：价格穿透防线但收盘弹回 → 防线更强，反转确认"""
+    df = state.ind.get("df")
+    close = state.ind.get("close")
+    atr = state.ind.get("atr") or 1
+    vr = state.ind.get("volume_ratio") or 1
+    if df is None or len(df) < 20 or not close:
+        return None
+
+    from support_resistance import find_swing_levels
+    levels = find_swing_levels(df, lookback=50)
+    idx = len(df) - 1
+    h = df["high"].iloc[idx]
+    l = df["low"].iloc[idx]
+    o = df["open"].iloc[idx]
+
+    for lvl in levels:
+        if lvl.touch_count < 2:
+            continue
+        direction = None
+        penetration = 0.0
+        # 阻力假突破：上影穿透阻力，收盘在下方
+        if lvl.side == "resistance" and h > lvl.price and close < lvl.price:
+            penetration = h - lvl.price
+            direction = "short"
+        # 支撑假突破：下影穿透支撑，收盘在上方
+        elif lvl.side == "support" and l < lvl.price and close > lvl.price:
+            penetration = lvl.price - l
+            direction = "long"
+        if direction and penetration >= atr * 0.3:
+            body = abs(close - o)
+            total_range = h - l
+            # 确认 pinbar 形态：影线≥60%振幅
+            if total_range > 0 and penetration >= total_range * 0.5:
+                return {
+                    "direction": direction,
+                    "severity": "critical" if lvl.touch_count >= 3 else "high",
+                    "confidence": 0.75 if lvl.touch_count >= 3 else 0.65,
+                    "evidence": f"假突破{lvl.price:.5g}({lvl.touch_count}触)",
+                }
+    return None
+
+
+def _check_retest(state: SignalState) -> dict | None:
+    """突破回踩确认：防线被突破后 → 价格回踩旧防线 + 拒绝"""
+    df = state.ind.get("df")
+    close = state.ind.get("close")
+    atr = state.ind.get("atr") or 1
+    vr = state.ind.get("volume_ratio") or 1
+    if df is None or len(df) < 20 or not close:
+        return None
+
+    from defense_state import get_defense_state
+    ds = get_defense_state()
+    breaks = ds.get_recent_breaks(state.symbol)
+    if not breaks:
+        return None
+
+    idx = len(df) - 1
+    h = df["high"].iloc[idx]
+    l = df["low"].iloc[idx]
+    o = df["open"].iloc[idx]
+
+    for br in breaks:
+        # 旧阻力被向上突破 → 现在是支撑，回踩做多
+        if br["side"] == "resistance" and br["dir"] == "up":
+            dist = close - br["price"]
+            if 0 <= dist <= atr * 0.8:  # 价格在旧防线附近
+                # 检查拒绝形态
+                body = abs(close - o)
+                lower_wick = min(o, close) - l if l < min(o, close) else 0
+                if lower_wick >= atr * 0.3 and close > o:
+                    return {
+                        "direction": "long",
+                        "severity": "critical",
+                        "confidence": 0.75,
+                        "evidence": f"回踩确认{br['price']:.5g}(阻力→支撑)",
+                    }
+        # 旧支撑被向下突破 → 现在是阻力，回踩做空
+        elif br["side"] == "support" and br["dir"] == "down":
+            dist = br["price"] - close
+            if 0 <= dist <= atr * 0.8:
+                body = abs(close - o)
+                upper_wick = h - max(o, close) if h > max(o, close) else 0
+                if upper_wick >= atr * 0.3 and close < o:
+                    return {
+                        "direction": "short",
+                        "severity": "critical",
+                        "confidence": 0.75,
+                        "evidence": f"回踩确认{br['price']:.5g}(支撑→阻力)",
+                    }
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # 信号注册表 — 加信号只需要在这加一行
 # ═══════════════════════════════════════════════════════════════════════
@@ -296,6 +434,10 @@ SIGNALS: list[SignalDef] = [
     SignalDef("macd_divergence",   "MACD背离",   _check_macd_divergence,   {}, "MACD背", "range"),
     # 波动突变 — 任意状态
     SignalDef("atr_expansion",     "波动爆发",   _check_atr_expansion,     {"threshold": 1.8}, "ATR", "any"),
+    # 防线突破/假突破/回踩
+    SignalDef("breakout",          "防线突破",   _check_breakout,          {}, "突破", "trend"),
+    SignalDef("fakeout",           "假突破",     _check_fakeout,           {}, "假破", "any"),
+    SignalDef("retest",            "回踩确认",   _check_retest,            {}, "回踩", "any"),
 ]
 
 
