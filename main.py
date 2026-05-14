@@ -720,6 +720,23 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         except Exception:
             pass
 
+    # ── 4H 方向分级: 逆4H但防线极强 → 降级标记而非丢弃 ──
+    if "✗方向" in check and dir_4h in ("bullish", "bearish"):
+        # 检查防线强度
+        has_strong_def = False
+        if alert.direction == "long" and "support" in sr_info:
+            sup_touches = sr_info["support"].touch_count
+            vp_sup = alert.meta.get("vp_support")
+            has_strong_def = sup_touches >= 3 or (sup_touches >= 2 and vp_sup)
+        elif alert.direction == "short" and "resistance" in sr_info:
+            res_touches = sr_info["resistance"].touch_count
+            vp_res = alert.meta.get("vp_resistance")
+            has_strong_def = res_touches >= 3 or (res_touches >= 2 and vp_res)
+        if has_strong_def:
+            check.remove("✗方向")
+            check.append("⚠逆4H")
+            alert.details["counter_4h"] = True
+
     # ── 仓位计算: 保证金占比 = 入场价 × risk_pct / (SL距离 × leverage) × 100% ──
     try:
         with open("config.yaml") as f:
