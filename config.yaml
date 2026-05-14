@@ -40,6 +40,8 @@ indicators:
 alert:
   dedup_minutes: 60
   min_confidence: 0.65
+  # 美股时段过滤(UTC): 美股代币化合约只在交易时段推送
+  us_market_hours: "13:30-21:00"
 history:
   lookback_days:
   - 90

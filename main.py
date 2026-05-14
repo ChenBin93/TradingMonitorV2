@@ -19,6 +19,15 @@ from utils import setup_logging, start_health_server
 from support_resistance import find_swing_levels, get_nearest_levels
 from volume_profile import compute_volume_profile, get_nearest_nodes
 
+# 美股代币化合約列表（非交易时段过滤）
+_US_STOCKS = {
+    "AAPL/USDT:USDT", "MSFT/USDT:USDT", "GOOGL/USDT:USDT", "AMZN/USDT:USDT",
+    "META/USDT:USDT", "NVDA/USDT:USDT", "TSLA/USDT:USDT", "AMD/USDT:USDT",
+    "INTC/USDT:USDT", "MU/USDT:USDT", "ORCL/USDT:USDT", "PLTR/USDT:USDT",
+    "MRVL/USDT:USDT", "TSM/USDT:USDT", "HOOD/USDT:USDT", "RKLB/USDT:USDT",
+    "WDC/USDT:USDT", "QQQ/USDT:USDT", "SPY/USDT:USDT",
+}
+
 
 # =============================================================================
 # 配置加载
@@ -256,6 +265,25 @@ def rank_symbols(alerts: list[Alert], all_ind: dict[str, dict[str, dict]]) -> li
     return sorted(result, key=lambda x: x.score, reverse=True)
 
 
+def _is_us_stock(symbol: str) -> bool:
+    """判断是否为美股代币化合約"""
+    return _US_STOCKS is not None and symbol in _US_STOCKS
+
+
+def _is_us_market_hours() -> bool:
+    """判断当前是否在美股交易时段 (UTC 13:30-21:00)"""
+    try:
+        now = datetime.now()
+        start = datetime(now.year, now.month, now.day, 13, 30)
+        end = datetime(now.year, now.month, now.day, 21, 0)
+        # 周一至周五
+        if now.weekday() >= 5:
+            return False
+        return start <= now <= end
+    except Exception:
+        return True  # 出错时不过滤
+
+
 # =============================================================================
 # 飞书报告格式化
 # =============================================================================
@@ -316,6 +344,10 @@ def format_consolidated_report(
         # 方向冲突：非 critical 信号 + 高 TF 方向不一致 → 丢弃
         has_dir_fail = any(c == "✗方向" for c in a.checklist)
         if has_dir_fail and a.severity != "critical":
+            continue
+
+        # 美股非交易时段过滤：代币化美股在休市期流动性极低，假信号多
+        if _is_us_stock(a.symbol) and not _is_us_market_hours():
             continue
 
         quality.append(a)
