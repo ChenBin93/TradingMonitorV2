@@ -28,6 +28,25 @@ _US_STOCKS = {
     "WDC/USDT:USDT", "QQQ/USDT:USDT", "SPY/USDT:USDT",
 }
 
+# 贵金属
+_METALS = {"XAU/USDT:USDT", "XAG/USDT:USDT", "XPT/USDT:USDT", "XPD/USDT:USDT", "XCU/USDT:USDT"}
+
+# ETF（非美股）
+_ETFS = {"EWY/USDT:USDT"}
+
+_CAT_LABELS = {"stock": "美股", "metal": "贵金属", "etf": "ETF", "crypto": "Crypto"}
+
+
+def _symbol_category(symbol: str) -> str:
+    """返回品种类别: stock | metal | etf | crypto"""
+    if symbol in _US_STOCKS:
+        return "stock"
+    if symbol in _METALS:
+        return "metal"
+    if symbol in _ETFS:
+        return "etf"
+    return "crypto"
+
 
 # =============================================================================
 # 配置加载
@@ -320,9 +339,11 @@ def format_consolidated_report(
     total_alerts: int,
     symbol_count: int,
     scan_time: datetime,
+    category_label: str = "",
 ) -> str:
     """合并预警 + 排名为一条消息"""
     time_str = scan_time.strftime("%H:%M")
+    cat_prefix = f"【{category_label}】" if category_label else ""
 
     # 低质量过滤
     quality = []
@@ -369,7 +390,7 @@ def format_consolidated_report(
     longs = sum(1 for a in quality if a.direction == "long")
     shorts = sum(1 for a in quality if a.direction == "short")
 
-    lines = [f"━━━ V2 扫描 {time_str} ━━━",
+    lines = [f"━━━ {cat_prefix}V2 扫描 {time_str} ━━━",
              f"{symbol_count}币 | {total_alerts}信号 | 推送{len(merged_list)}条 | 多{longs}/空{shorts}"]
 
     if merged_list:
@@ -898,12 +919,22 @@ async def async_main():
             # TOP5 排序
             ranks = rank_symbols(alerts, all_ind) if filtered else []
 
-            # 合并推送
+            # 合并推送（按品类分组）
             if filtered:
-                report = format_consolidated_report(
-                    filtered, ranks, len(alerts), len(symbols), scan_start)
-                feishu.send(report)
-                logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(ranks)} ranked")
+                # 按品类分桶
+                buckets: dict[str, list[Alert]] = {}
+                for a in filtered:
+                    cat = _symbol_category(a.symbol)
+                    buckets.setdefault(cat, []).append(a)
+
+                for cat, cat_alerts in buckets.items():
+                    cat_label = _CAT_LABELS.get(cat, cat)
+                    cat_ranks = [r for r in ranks if _symbol_category(r.symbol) == cat]
+                    report = format_consolidated_report(
+                        cat_alerts, cat_ranks, len(alerts), len(symbols), scan_start,
+                        category_label=cat_label)
+                    feishu.send(report)
+                logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(ranks)} ranked ({'/'.join(f'{k}:{len(v)}' for k,v in buckets.items())})")
             else:
                 logger.info(f"Scan #{scan_count}: 0 push alerts (raw {len(alerts)} signals scanned)")
 
