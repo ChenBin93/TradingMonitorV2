@@ -419,17 +419,17 @@ def format_consolidated_report(
         per_sym_count: dict[str, int] = {}
         for a in merged_list:
             sym_key = a.symbol
-            if per_sym_count.get(sym_key, 0) >= 2:
+            if per_sym_count.get(sym_key, 0) >= 3:
                 continue
             lines.append(fmt_short_alert(a))
             per_sym_count[sym_key] = per_sym_count.get(sym_key, 0) + 1
             shown += 1
-            if shown >= 10:
+            if shown >= 20:
                 break
 
     if ranks:
-        lines.append(f"\n━━━ TOP{min(5, len(ranks))} ━━━")
-        for i, r in enumerate(ranks[:5], 1):
+        lines.append(f"\n━━━ TOP{min(10, len(ranks))} ━━━")
+        for i, r in enumerate(ranks[:10], 1):
             sym = r.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
             d = {"long": "多", "short": "空"}.get(r.direction, "")
             tags = "/".join(r.signal_tags[:3])
@@ -437,16 +437,6 @@ def format_consolidated_report(
             lines.append(f"{i}. {sym} {d} {r.score:.0%} | {tags} | {reason}")
 
     return "\n".join(lines)
-
-    # ── TOP5 排名 ──
-    if ranks:
-        lines.append(f"\n━━━ TOP{min(5, len(ranks))} ━━━")
-        for i, r in enumerate(ranks[:5], 1):
-            sym = r.symbol.replace("-USDT-SWAP", "/USDT").split(":")[0]
-            d = {"long": "多", "short": "空"}.get(r.direction, "")
-            tags = "/".join(r.signal_tags[:3])
-            reason = "/".join(r.reasons[:2])
-            lines.append(f"{i}. {sym} {d} {r.score:.0%} | {tags} | {reason}")
 
     return "\n".join(lines)
 
