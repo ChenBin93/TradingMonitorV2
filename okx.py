@@ -3,6 +3,7 @@
 import asyncio
 import json
 import threading
+import time
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Callable
@@ -26,6 +27,7 @@ class KlineCache:
 
     def __init__(self, max_candles: int = 500):
         self._data: dict[str, dict[str, list[Candle]]] = {}
+        self._last_update: dict[str, dict[str, float]] = {}  # {symbol: {tf: epoch_seconds}}
         self._max = max_candles
         self._lock = threading.RLock()
 
@@ -39,6 +41,17 @@ class KlineCache:
                 candles.append(candle)
                 if len(candles) > self._max:
                     candles.pop(0)
+            sym_ts = self._last_update.setdefault(symbol, {})
+            sym_ts[timeframe] = time.time()
+
+    def get_data_age_minutes(self, symbol: str, timeframe: str) -> float | None:
+        """返回该 symbol/tf 缓存数据上次更新的时间 (分钟前), None=从未更新"""
+        with self._lock:
+            sym_ts = self._last_update.get(symbol, {})
+            ts = sym_ts.get(timeframe)
+            if ts is None:
+                return None
+            return (time.time() - ts) / 60
 
     def get_closed(self, symbol: str, timeframe: str) -> list[Candle]:
         with self._lock:

@@ -387,6 +387,11 @@ def format_consolidated_report(
         if has_pos_fail:
             continue
 
+        # 数据陈旧：WS 断连超 2 小时 → 丢弃
+        has_stale = any(c == "⚠数据陈旧" for c in a.checklist)
+        if has_stale:
+            continue
+
         # 美股非交易时段过滤：代币化美股在休市期流动性极低，假信号多
         if _is_us_stock(a.symbol) and not _is_us_market_hours():
             continue
@@ -552,6 +557,15 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     if ind_1h:
         dir_1h = ind_1h.get("ma_alignment", "neutral")
 
+    # ── 数据新鲜度检查 ──
+    df_1h = (ind_1h or {}).get("df")
+    if df_1h is not None and len(df_1h) > 0:
+        latest_ts = df_1h["timestamp"].iloc[-1]
+        age_min = (datetime.now() - latest_ts).total_seconds() / 60
+        if age_min > 120:  # 2小时无更新 → WS可能断了
+            alert.meta["stale_data"] = True
+            check.append("⚠数据陈旧")
+
     # ── 方向确认：至少一个高 TF 同意信号方向，优先信 4h ──
     sig_dir = alert.direction
     if dir_4h in ("bullish", "bearish"):
@@ -568,9 +582,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         check.append("?方向")
 
     # ── 1h S/R + SL/TP/RR ──
-    ind_1h = tf_ind.get("1h")
     ind_base = ind_1h or tf_ind.get("15m", {})
-    df_1h = (ind_1h or {}).get("df")
     current_price = ind_base.get("close")
     atr = ind_base.get("atr") or 1
 
@@ -973,12 +985,35 @@ async def async_main():
         min_confidence=config.get("alert", {}).get("min_confidence", 0.65),
     )
     scan_count = 0
+    last_rest_refresh = datetime.min
+
+    async def _refresh_cache_if_stale():
+        nonlocal last_rest_refresh
+        if (datetime.now() - last_rest_refresh).total_seconds() < 1800:
+            return  # 30 分钟内已刷新过
+        last_rest_refresh = datetime.now()
+        refreshed = 0
+        for sym in symbols:
+            for tf in timeframes:
+                try:
+                    bars = okx.fetch_ohlcv(sym, tf, limit=5)
+                    for bar in bars:
+                        cache.update(sym, tf, Candle(
+                            timestamp=bar["timestamp"], open=bar["open"],
+                            high=bar["high"], low=bar["low"],
+                            close=bar["close"], volume=bar["volume"]))
+                    refreshed += 1
+                except Exception:
+                    pass
+        if refreshed > 0:
+            logger.debug(f"REST cache refresh: {refreshed} bars")
 
     while True:
         await asyncio.sleep(interval)
         scan_count += 1
         scan_start = datetime.now()
         try:
+            await _refresh_cache_if_stale()
             alerts, all_ind = do_scan(symbols, cache, config)
 
             # 多时间框架确认
