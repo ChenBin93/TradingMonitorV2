@@ -208,10 +208,10 @@ class AlertFilter:
                     continue
                 self._last[key] = datetime.now()
                 result.append(a)
-        # 同 symbol/timeframe/signal_type 只保留最高置信度
+        # 同 symbol/signal_type 只保留最高置信度（不同信号类型各自保留）
         deduped: dict[str, Alert] = {}
         for a in result:
-            k = f"{a.symbol}_{a.timeframe}_{a.signal_type}"
+            k = f"{a.symbol}_{a.signal_type}"
             if k not in deduped or a.confidence > deduped[k].confidence:
                 deduped[k] = a
         return sorted(deduped.values(), key=lambda x: x.confidence, reverse=True)
