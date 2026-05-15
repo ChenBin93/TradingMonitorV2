@@ -415,8 +415,17 @@ def format_consolidated_report(
 
     if merged_list:
         lines.append("")
-        for a in merged_list[:8]:
+        shown = 0
+        per_sym_count: dict[str, int] = {}
+        for a in merged_list:
+            sym_key = a.symbol
+            if per_sym_count.get(sym_key, 0) >= 2:
+                continue
             lines.append(fmt_short_alert(a))
+            per_sym_count[sym_key] = per_sym_count.get(sym_key, 0) + 1
+            shown += 1
+            if shown >= 10:
+                break
 
     if ranks:
         lines.append(f"\n━━━ TOP{min(5, len(ranks))} ━━━")
