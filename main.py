@@ -486,8 +486,10 @@ def do_scan(
 
         all_ind[sym] = tf_ind
 
-        # ── 第二遍：逐 TF 检查信号 ──
+        # ── 第二遍：逐 TF 检查信号（4H 仅做方向锚，不独立出信号）──
         for tf, ind in tf_ind.items():
+            if tf == "4h":
+                continue  # 4H 只提供方向确认，信号在 15m/1h 上检测
             direction = get_direction(ind)
             regime = get_regime(ind)
             state = SignalState(symbol=sym, timeframe=tf, ind=ind,
