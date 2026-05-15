@@ -339,7 +339,13 @@ def fmt_short_alert(a: Alert) -> str:
     vp_line = f"\n   量防线: S:{vp_s} R:{vp_r}" if vp_s or vp_r else ""
     trail = m.get("trailing", "")
     trail_line = f"\n   {trail}" if trail else ""
-    return f"{line}\n{line2}{opt_line}{vp_line}{trail_line}"
+    tp_full = m.get("tp_full", "")
+    tp_line = f"\n   TP:{tp_full}" if tp_full else ""
+    tp1 = m.get("tp1", "")
+    tp2 = m.get("tp2", "")
+    if tp1 and tp2:
+        tp_line = f"\n   出场: TP1@{tp1} TP2@{tp2} Moon(30%)"
+    return f"{line}\n{line2}{opt_line}{vp_line}{tp_line}{trail_line}"
 
 
 def format_consolidated_report(
@@ -830,6 +836,24 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             move_price = entry_price - atr * 2
             if tp < entry_price and move_price > tp:
                 alert.meta["trailing"] = f"移损@{sf.format(entry_price-atr*0.5)}(+2ATR移保本)"
+
+    # ── 分批止盈 ──
+    if entry_price > 0 and atr > 0 and tp != 0:
+        sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.5f}"
+        if alert.direction == "long" and tp > entry_price:
+            tp1 = entry_price + atr * 0.8
+            if tp1 < tp:
+                alert.meta["tp1"] = f"{sf.format(tp1)}(40%)"
+                alert.meta["tp2"] = f"{sf.format(tp)}(30%)"
+            else:
+                alert.meta["tp_full"] = f"{sf.format(tp)}(70%)"
+        elif alert.direction == "short" and tp < entry_price:
+            tp1 = entry_price - atr * 0.8
+            if tp1 > tp:
+                alert.meta["tp1"] = f"{sf.format(tp1)}(40%)"
+                alert.meta["tp2"] = f"{sf.format(tp)}(30%)"
+            else:
+                alert.meta["tp_full"] = f"{sf.format(tp)}(70%)"
 
     alert.checklist = check
 
