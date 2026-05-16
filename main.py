@@ -315,15 +315,6 @@ def fmt_short_alert(a: Alert) -> str:
     m = a.meta
     severity_icon = "🟢" if a.details.get("stage2_upgrade") else ("🔴" if a.severity == "critical" else "🟠")
     rr = m.get("rr", "-")
-    opt_rr_raw = m.get("opt_rr", "")
-    if opt_rr_raw:
-        try:
-            opt_val = float(opt_rr_raw.split(":")[0])
-            cur_val = float(rr.split(":")[0]) if rr != "-" else 0
-            if opt_val > cur_val:
-                rr = opt_rr_raw  # 使用最优入场 RR
-        except ValueError:
-            pass
     s = m.get("support", "-")
     r = m.get("resistance", "-")
     checks = " ".join([c for c in a.checklist if c.startswith("✓") or c.startswith("⚠")][:4])
@@ -560,13 +551,23 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         dir_1h = ind_1h.get("ma_alignment", "neutral")
 
     # ── 数据新鲜度检查 ──
+    ind_15m = tf_ind.get("15m", {})
+    df_15m = ind_15m.get("df")
     df_1h = (ind_1h or {}).get("df")
-    if df_1h is not None and len(df_1h) > 0:
+    is_stale = False
+    if df_15m is not None and len(df_15m) > 0:
+        latest_ts = df_15m["timestamp"].iloc[-1]
+        age_min = (datetime.now() - latest_ts).total_seconds() / 60
+        if age_min > 30:  # 30分钟无15m更新 → WS或REST都断了
+            is_stale = True
+    elif df_1h is not None and len(df_1h) > 0:
         latest_ts = df_1h["timestamp"].iloc[-1]
         age_min = (datetime.now() - latest_ts).total_seconds() / 60
-        if age_min > 120:  # 2小时无更新 → WS可能断了
-            alert.meta["stale_data"] = True
-            check.append("⚠数据陈旧")
+        if age_min > 75:  # 1H超过75分钟无新K
+            is_stale = True
+    if is_stale:
+        alert.meta["stale_data"] = True
+        check.append("⚠数据陈旧")
 
     # ── 方向确认：至少一个高 TF 同意信号方向，优先信 4h ──
     sig_dir = alert.direction
@@ -987,13 +988,7 @@ async def async_main():
         min_confidence=config.get("alert", {}).get("min_confidence", 0.65),
     )
     scan_count = 0
-    last_rest_refresh = datetime.min
-
     async def _refresh_cache_if_stale():
-        nonlocal last_rest_refresh
-        if (datetime.now() - last_rest_refresh).total_seconds() < 1800:
-            return  # 30 分钟内已刷新过
-        last_rest_refresh = datetime.now()
         refreshed = 0
         for sym in symbols:
             for tf in timeframes:
