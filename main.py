@@ -18,6 +18,7 @@ from notify import Feishu
 from utils import setup_logging, start_health_server
 from support_resistance import find_swing_levels, get_nearest_levels
 from volume_profile import compute_volume_profile, get_nearest_nodes
+from market_state import compute_market_state
 
 # 美股代币化合約列表（非交易时段过滤）
 _US_STOCKS = {
@@ -1029,6 +1030,14 @@ async def async_main():
 
             # 合并推送（按品类分组）
             if filtered:
+                # ── 市场状态（全局方向偏倚）──
+                ms = compute_market_state(all_ind)
+                if ms["bias"] != "neutral":
+                    bias_icon = "🔺" if ms["bias"] == "long" else "🔻"
+                    bias_text = "做多" if ms["bias"] == "long" else "做空"
+                    ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} ━━━\n{ms['desc']}\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
+                    feishu.send(ms_line)
+
                 # 按品类分桶
                 buckets: dict[str, list[Alert]] = {}
                 for a in filtered:
