@@ -1,5 +1,5 @@
 # 市场状态矩阵 — 4H+1H 组合 → 方向偏倚
-# v2: 基于回测的规则判断(n=1897 BTC 1H, 16个月数据, 覆盖多空完整周期)
+# v3: 多空不对称——空头ADX低=反转(燃料烧完), 多头ADX低≠反转(买家还在)
 
 def compute_market_state(tf_ind: dict) -> dict:
     """
@@ -66,10 +66,17 @@ def compute_market_state(tf_ind: dict) -> dict:
         pullback_desc = f"深({direction}{pullback_pct:.0f}%)" if abs(pullback_pct) >= 3 else f"中({direction}{pullback_pct:.0f}%)"
 
     # ── 方向偏倚（回测 v2, n=1897 BTC 1H, 16个月多空完整周期）──
-    # 整体: 49.6%多 / 50.4%空 — 接近随机
-    # 关键发现: 趋势方向+ADX强度 组合决定偏倚方向
-    #   ↑ 多头ADX高≠衰竭(52%), 空头ADX高=持续(59%)
-    #   ↑ ADX低+反方向=反转信号(多头低ADX→65%多, 空头低ADX→62%多=反转)
+    # 整体: 49.6%多 / 50.4%空
+    #
+    # 多空不对称（燃料池结构不同）:
+    #   → 多头侧杠杆散户集中 → 连锁爆仓 → 空头趋势燃烧猛、反转快
+    #   → 空头侧套保+做市+套利 → 各自独立 → 多头趋势磨叽、不连锁
+    #
+    # 实操推论:
+    #   空头ADX低(衰减) → 燃料烧完 → 反转做多 62% ← 最高信反转
+    #   多头ADX低(衰减) → 买家还在慢慢来 → 继续偏多 65% ← 不反转!
+    #   空头ADX高 → 应做空 59% ← 燃料还在烧
+    #   多头ADX高 → 接近中性 52% ← 推力分散
     bias = "neutral"
     conf = 0
     bias_reason = ""
@@ -78,28 +85,30 @@ def compute_market_state(tf_ind: dict) -> dict:
         if adx_4h >= 30:
             bias = "long"
             conf = 52
-            bias_reason = "4H强多→持续(回测52%多,n=277)"
+            bias_reason = "4H强多→近中性(推力分散,n=277)"
         elif adx_4h >= 20:
             bias = "long"
             conf = 57
-            bias_reason = "4H温和多→持续(回测57%多,n=130)"
+            bias_reason = "4H温和多→持续(买家还在,n=130)"
         else:
+            # 多头ADX低 ≠ 反转! 买家还在慢慢进来
             bias = "long"
             conf = 65
-            bias_reason = "4H弱多→强势多(回测65%多,n=141)"
+            bias_reason = "4H弱多→继续多(买家未耗尽,n=141)"
     elif ma_align_4h == "bearish":
         if adx_4h >= 30:
             bias = "short"
             conf = 59
-            bias_reason = "4H强空→持续(回测59%空,n=329)"
+            bias_reason = "4H强空→持续(燃料还在烧,n=329)"
         elif adx_4h >= 20:
             bias = "short"
             conf = 60
-            bias_reason = "4H温和空→持续(回测60%空,n=177)"
+            bias_reason = "4H温和空→持续(燃料充足,n=177)"
         else:
+            # 空头ADX低 = 反转! 燃料烧光了
             bias = "long"
             conf = 62
-            bias_reason = "4H弱空→反转多(回测62%多,n=86)"
+            bias_reason = "4H弱空→反转多(燃料烧完!n=86)"
     else:
         # neutral — 整体 51/49, 不加方向偏倚
         bias = "neutral"
