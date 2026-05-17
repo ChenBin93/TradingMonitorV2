@@ -1,5 +1,5 @@
 # 市场状态矩阵 — 4H+1H 组合 → 方向偏倚
-# v1: 基于规则的定性判断，精确概率后续回测校准
+# v2: 基于回测的规则判断(n=1897 BTC 1H, 16个月数据, 覆盖多空完整周期)
 
 def compute_market_state(tf_ind: dict) -> dict:
     """
@@ -65,43 +65,46 @@ def compute_market_state(tf_ind: dict) -> dict:
         direction = "+" if pullback_pct >= 0 else ""
         pullback_desc = f"深({direction}{pullback_pct:.0f}%)" if abs(pullback_pct) >= 3 else f"中({direction}{pullback_pct:.0f}%)"
 
-    # ── 方向偏倚（回测校准 v1, n=264 BTC 1H 历史数据）──
-    # 关键发现: ADX>30 = 趋势衰竭 → 反向偏倚; ADX 20-30 = 趋势持续 → 同向偏倚
+    # ── 方向偏倚（回测 v2, n=1897 BTC 1H, 16个月多空完整周期）──
+    # 整体: 49.6%多 / 50.4%空 — 接近随机
+    # 关键发现: 趋势方向+ADX强度 组合决定偏倚方向
+    #   ↑ 多头ADX高≠衰竭(52%), 空头ADX高=持续(59%)
+    #   ↑ ADX低+反方向=反转信号(多头低ADX→65%多, 空头低ADX→62%多=反转)
     bias = "neutral"
     conf = 0
     bias_reason = ""
 
-    if adx_4h >= 20 and adx_4h < 30:
-        # 温和趋势 — 同向有优势
-        if ma_align_4h == "bullish":
+    if ma_align_4h == "bullish":
+        if adx_4h >= 30:
             bias = "long"
-            conf = 70
-            bias_reason = "4H温和多→同向(回测82%)"
-            if pullback_pct < -3:
-                conf = 60
-                bias_reason += "·深回调-降"
-        elif ma_align_4h == "bearish":
-            bias = "short"
-            conf = 70
-            bias_reason = "4H温和空→同向(回测80%)"
-            if pullback_pct > 3:
-                conf = 60
-                bias_reason += "·深反弹-降"
-    elif adx_4h >= 30:
-        # 强趋势 — 衰竭风险 → 反向偏倚
-        if ma_align_4h == "bullish":
-            bias = "short"
-            conf = 55
-            bias_reason = "4H强多→衰竭(回测55%空)"
-        elif ma_align_4h == "bearish":
+            conf = 52
+            bias_reason = "4H强多→持续(回测52%多,n=277)"
+        elif adx_4h >= 20:
             bias = "long"
-            conf = 55
-            bias_reason = "4H强空→衰竭(回测55%多)"
+            conf = 57
+            bias_reason = "4H温和多→持续(回测57%多,n=130)"
+        else:
+            bias = "long"
+            conf = 65
+            bias_reason = "4H弱多→强势多(回测65%多,n=141)"
+    elif ma_align_4h == "bearish":
+        if adx_4h >= 30:
+            bias = "short"
+            conf = 59
+            bias_reason = "4H强空→持续(回测59%空,n=329)"
+        elif adx_4h >= 20:
+            bias = "short"
+            conf = 60
+            bias_reason = "4H温和空→持续(回测60%空,n=177)"
+        else:
+            bias = "long"
+            conf = 62
+            bias_reason = "4H弱空→反转多(回测62%多,n=86)"
     else:
-        # ADX < 20 — 无方向性
+        # neutral — 整体 51/49, 不加方向偏倚
         bias = "neutral"
         conf = 0
-        bias_reason = "弱趋势-无方向(ADX<20)"
+        bias_reason = "4H中性-无方向偏倚"
 
     # 压缩调整
     if compression == "紧" and bias != "neutral":
