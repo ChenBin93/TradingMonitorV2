@@ -65,37 +65,43 @@ def compute_market_state(tf_ind: dict) -> dict:
         direction = "+" if pullback_pct >= 0 else ""
         pullback_desc = f"深({direction}{pullback_pct:.0f}%)" if abs(pullback_pct) >= 3 else f"中({direction}{pullback_pct:.0f}%)"
 
-    # ── 方向偏倚 ──
+    # ── 方向偏倚（回测校准 v1, n=264 BTC 1H 历史数据）──
+    # 关键发现: ADX>30 = 趋势衰竭 → 反向偏倚; ADX 20-30 = 趋势持续 → 同向偏倚
     bias = "neutral"
     conf = 0
     bias_reason = ""
 
-    if adx_4h >= 25 and ma_align_4h == "bullish":
-        if pullback_pct >= -2:
+    if adx_4h >= 20 and adx_4h < 30:
+        # 温和趋势 — 同向有优势
+        if ma_align_4h == "bullish":
             bias = "long"
             conf = 70
-            bias_reason = "4H强多+回调浅"
-        elif pullback_pct < -5:
-            bias = "long"
-            conf = 55
-            bias_reason = "4H多但深回调-反转风险"
-        else:
-            bias = "long"
-            conf = 60
-            bias_reason = "4H多+中性回调"
-    elif adx_4h >= 25 and ma_align_4h == "bearish":
-        if pullback_pct <= 2:
+            bias_reason = "4H温和多→同向(回测82%)"
+            if pullback_pct < -3:
+                conf = 60
+                bias_reason += "·深回调-降"
+        elif ma_align_4h == "bearish":
             bias = "short"
             conf = 70
-            bias_reason = "4H强空+反弹浅"
-        elif pullback_pct > 5:
+            bias_reason = "4H温和空→同向(回测80%)"
+            if pullback_pct > 3:
+                conf = 60
+                bias_reason += "·深反弹-降"
+    elif adx_4h >= 30:
+        # 强趋势 — 衰竭风险 → 反向偏倚
+        if ma_align_4h == "bullish":
             bias = "short"
             conf = 55
-            bias_reason = "4H空但深反弹-反转风险"
-        else:
-            bias = "short"
-            conf = 60
-            bias_reason = "4H空+中性回调"
+            bias_reason = "4H强多→衰竭(回测55%空)"
+        elif ma_align_4h == "bearish":
+            bias = "long"
+            conf = 55
+            bias_reason = "4H强空→衰竭(回测55%多)"
+    else:
+        # ADX < 20 — 无方向性
+        bias = "neutral"
+        conf = 0
+        bias_reason = "弱趋势-无方向(ADX<20)"
 
     # 压缩调整
     if compression == "紧" and bias != "neutral":
