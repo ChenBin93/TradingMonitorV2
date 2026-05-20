@@ -89,7 +89,13 @@ class OKXClient:
             if m.get("swap") and m.get("quote") == quote and m.get("active")
         ]
         tickers = self._exchange.fetch_tickers(swaps)
-        ranked = sorted(swaps, key=lambda s: tickers.get(s, {}).get("quoteVolume", 0) or 0, reverse=True)
+        # OKX ccxt 不提供 quoteVolume — 用 baseVolume × 现价估算
+        def _est_vol(s):
+            t = tickers.get(s, {})
+            bv = t.get("baseVolume", 0) or 0
+            p = t.get("last", 0) or 0
+            return bv * p
+        ranked = sorted(swaps, key=_est_vol, reverse=True)
         return ranked[:n]
 
     def get_24h_volume(self, symbols: list[str]) -> dict[str, float]:
