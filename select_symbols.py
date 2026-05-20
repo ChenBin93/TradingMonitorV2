@@ -10,6 +10,7 @@ sys.path.insert(0, ".")
 
 from okx import OKXClient
 from support_resistance import find_swing_levels
+from indicators import compute as compute_indicators
 from loguru import logger
 
 
@@ -19,7 +20,8 @@ def select_symbols(
     tf: str = "4h",
     lookback_bars: int = 60,
     min_structure_score: float = 0.3,
-    min_volume: float = 0,  # 24h最小成交量(USDT), 0=不过滤
+    min_volume: float = 0,
+    crypto_only: bool = False,
 ) -> list[str]:
     """
     从 top N 币种中筛选出独立且结构清晰的标的。
@@ -27,6 +29,19 @@ def select_symbols(
     okx = OKXClient()
     all_symbols = okx.get_top_symbols(pool_size)
     logger.info(f"初筛池: {len(all_symbols)} 币")
+
+    # ── 品类过滤 ──
+    if crypto_only:
+        _NON_CRYPTO = {
+            "AAPL/USDT:USDT", "MSFT/USDT:USDT", "GOOGL/USDT:USDT", "AMZN/USDT:USDT",
+            "META/USDT:USDT", "NVDA/USDT:USDT", "TSLA/USDT:USDT", "AMD/USDT:USDT",
+            "INTC/USDT:USDT", "MU/USDT:USDT", "ORCL/USDT:USDT", "PLTR/USDT:USDT",
+            "MRVL/USDT:USDT", "TSM/USDT:USDT", "HOOD/USDT:USDT", "RKLB/USDT:USDT",
+            "WDC/USDT:USDT", "QQQ/USDT:USDT", "SPY/USDT:USDT", "EWY/USDT:USDT",
+            "XAU/USDT:USDT", "XAG/USDT:USDT", "XPT/USDT:USDT", "XPD/USDT:USDT", "XCU/USDT:USDT",
+        }
+        all_symbols = [s for s in all_symbols if s not in _NON_CRYPTO]
+        logger.info(f"品类过滤(仅crypto): {len(all_symbols)} 币")
 
     # ── 第零步：成交量过滤 ──
     if min_volume > 0:
@@ -106,12 +121,19 @@ def select_symbols(
         avg_touches = np.mean([l.touch_count for l in active])
         price = df["close"].iloc[-1]
         price_range = df["high"].max() - df["low"].min()
+
+        # 趋势加成: 强趋势中防线少是正常的, ADX 越高加分越多
+        ind_params = {"adx_period": 14}
+        ind = compute_indicators(df, ind_params)
+        adx_val = ind.get("adx", 0) or 0
+        trend_bonus = min(adx_val / 30, 1.0) * 0.3
+
         if price_range > 0 and price > 0:
-            # 防线密度(每1%价格区间的防线数) × 平均触及强度
+            # 防线密度(每1%价格区间的防线数) × 平均触及强度 + 趋势加成
             density = len(active) / (price_range / price * 100)
-            structure_score = density * avg_touches
+            structure_score = density * avg_touches + trend_bonus
         else:
-            structure_score = 0.0
+            structure_score = trend_bonus
         scores[sym] = round(structure_score, 4)
 
     # ── 第五步：综合排序输出 ──
@@ -172,6 +194,7 @@ if __name__ == "__main__":
     p.add_argument("--bars", type=int, default=60)
     p.add_argument("--min-score", type=float, default=0.3)
     p.add_argument("--min-volume", type=float, default=0, help="24h最小成交量(USDT), 如5000000=5M")
+    p.add_argument("--crypto-only", action="store_true", help="仅筛选加密货币,排除股票/商品/ETF")
     p.add_argument("--write-config", action="store_true", help="直接写入 config.yaml")
     args = p.parse_args()
 
@@ -182,6 +205,7 @@ if __name__ == "__main__":
         lookback_bars=args.bars,
         min_structure_score=args.min_score,
         min_volume=args.min_volume,
+        crypto_only=args.crypto_only,
     )
 
     if args.write_config and result:
