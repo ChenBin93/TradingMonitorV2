@@ -2,7 +2,6 @@ timeframes:
 - 5m
 - 1h
 - 4h
-scan_interval: 300
 indicators:
   5m:
     roc_period: 5

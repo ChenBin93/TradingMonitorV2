@@ -932,12 +932,16 @@ async def async_main():
         pos_thread = threading.Thread(target=pm.run, daemon=True, name="position")
         pos_thread.start()
 
-    interval = config.get("scan_interval", 120)
     alert_filter = AlertFilter(
         silence_minutes=config.get("alert", {}).get("dedup_minutes", 30),
         min_confidence=config.get("alert", {}).get("min_confidence", 0.65),
     )
     scan_count = 0
+
+    def _wait_next_5m():
+        now = datetime.utcnow()
+        s = (now.minute % 5) * 60 + now.second + now.microsecond / 1e6
+        return max(300 - s, 0.1)
 
     async def _refresh_cache_if_stale():
         sem = asyncio.Semaphore(5)
@@ -962,7 +966,7 @@ async def async_main():
             logger.debug(f"REST cache refresh: {refreshed} bars")
 
     while True:
-        await asyncio.sleep(interval)
+        await asyncio.sleep(_wait_next_5m())
         scan_count += 1
         scan_start = datetime.now()
         try:
