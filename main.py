@@ -88,6 +88,7 @@ class Alert:
             "breakout": "突破", "fakeout": "假破", "retest": "回踩",
             "rsi_extreme": "RSI", "volume_spike": "VOL",
             "rs_strength": "RS+", "rs_weakness": "RS-",
+            "trend_pullback": "回调",
         }
         return tags.get(self.signal_type, self.signal_type[:4])
 
@@ -97,6 +98,7 @@ class Alert:
             "breakout": "防线突破", "fakeout": "假突破反转", "retest": "回踩确认",
             "rsi_extreme": "RSI极值", "volume_spike": "放量异动",
             "rs_strength": "RS强势", "rs_weakness": "RS弱势",
+            "trend_pullback": "趋势回调",
         }
         return names.get(self.signal_type, self.signal_type)
 
@@ -431,10 +433,12 @@ def do_scan(
                 continue
             direction = get_direction(ind)
             regime = get_regime(ind)
+            ind_1h = tf_ind.get("1h", {})
             state = SignalState(
                 symbol=sym, timeframe=tf, ind=ind,
                 regime=regime, direction=direction,
                 rs_scores=rs_scores_all.get(sym, {}),
+                ind_1h=ind_1h,
             )
 
             for sig_def in SIGNALS:
@@ -563,6 +567,20 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
                 check.append("?无阻力")
         else:
             check.append("?边界")
+
+    # ── RSI 极值位置收紧: 必须靠近 1H S/R 才有效 ──
+    if alert.signal_type == "rsi_extreme":
+        dist_to_sr = None
+        if alert.direction == "long" and "support" in sr_info:
+            dist_to_sr = (current_price - sr_info["support"].price) / atr_1h if atr_1h > 0 else None
+            if dist_to_sr is not None and dist_to_sr > 1.0:
+                check.append("✗位置")
+        elif alert.direction == "short" and "resistance" in sr_info:
+            dist_to_sr = (sr_info["resistance"].price - current_price) / atr_1h if atr_1h > 0 else None
+            if dist_to_sr is not None and dist_to_sr > 1.0:
+                check.append("✗位置")
+        else:
+            check.append("✗位置")
 
     # ── SL/TP/RR ──
     entry_price = current_price or ind_base.get("close") or 0

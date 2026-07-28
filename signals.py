@@ -15,7 +15,7 @@ class SignalState:
     direction: str = "neutral"
     params: dict = field(default_factory=dict)
     rs_scores: dict[str, dict] = field(default_factory=dict)
-    # rs_scores = {"5m": {"score": 50, "level": "strong", "zscore": 3.0}, "1h": {...}, "4h": {...}}
+    ind_1h: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -28,22 +28,30 @@ class SignalDef:
     gate: str = "any"
 
 
+def _sr_df(state: SignalState):
+    """返回 S/R 计算用的 DataFrame: 1H 优先（大结构），否则用当前 TF"""
+    return (state.ind_1h or {}).get("df") or state.ind.get("df")
+
+
 # ═══════════════════════════════════════════════════════════════════════
-# S/R 结构信号
+# S/R 结构信号 (用 1H S/R, 5m 入场)
 # ═══════════════════════════════════════════════════════════════════════
 
 def _check_breakout(state: SignalState) -> dict | None:
-    df = state.ind.get("df")
+    df_sr = _sr_df(state)
     close = state.ind.get("close")
     atr = state.ind.get("atr") or 1
     vr = state.ind.get("volume_ratio") or 1
-    if df is None or len(df) < 20 or not close:
+    if df_sr is None or len(df_sr) < 20 or not close:
         return None
 
-    levels = find_swing_levels(df, lookback=50)
-    idx = len(df) - 1
-    o = df["open"].iloc[idx]
+    df_cur = state.ind.get("df")
+    if df_cur is None or len(df_cur) == 0:
+        return None
+    idx = len(df_cur) - 1
+    o = df_cur["open"].iloc[idx]
 
+    levels = find_swing_levels(df_sr, lookback=50)
     for lvl in levels:
         if lvl.touch_count < 2:
             continue
@@ -72,18 +80,20 @@ def _check_breakout(state: SignalState) -> dict | None:
 
 
 def _check_fakeout(state: SignalState) -> dict | None:
-    df = state.ind.get("df")
+    df_sr = _sr_df(state)
     close = state.ind.get("close")
     atr = state.ind.get("atr") or 1
-    if df is None or len(df) < 20 or not close:
+    if df_sr is None or len(df_sr) < 20 or not close:
         return None
 
-    levels = find_swing_levels(df, lookback=50)
-    idx = len(df) - 1
-    h = df["high"].iloc[idx]
-    l = df["low"].iloc[idx]
-    o = df["open"].iloc[idx]
+    df_cur = state.ind.get("df")
+    if df_cur is None or len(df_cur) == 0:
+        return None
+    idx = len(df_cur) - 1
+    h = df_cur["high"].iloc[idx]
+    l = df_cur["low"].iloc[idx]
 
+    levels = find_swing_levels(df_sr, lookback=50)
     for lvl in levels:
         if lvl.touch_count < 2:
             continue
@@ -108,21 +118,23 @@ def _check_fakeout(state: SignalState) -> dict | None:
 
 
 def _check_retest(state: SignalState) -> dict | None:
-    df = state.ind.get("df")
     close = state.ind.get("close")
     atr = state.ind.get("atr") or 1
-    if df is None or len(df) < 20 or not close:
+    if not close:
         return None
+
+    df_cur = state.ind.get("df")
+    if df_cur is None or len(df_cur) == 0:
+        return None
+    idx = len(df_cur) - 1
+    h = df_cur["high"].iloc[idx]
+    l = df_cur["low"].iloc[idx]
+    o = df_cur["open"].iloc[idx]
 
     ds = get_defense_state()
     breaks = ds.get_recent_breaks(state.symbol)
     if not breaks:
         return None
-
-    idx = len(df) - 1
-    h = df["high"].iloc[idx]
-    l = df["low"].iloc[idx]
-    o = df["open"].iloc[idx]
 
     for br in breaks:
         if br["side"] == "resistance" and br["dir"] == "up":
@@ -218,17 +230,93 @@ def _check_rs_weakness(state: SignalState) -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 趋势回调信号
+# ═══════════════════════════════════════════════════════════════════════
+
+def _check_trend_pullback(state: SignalState) -> dict | None:
+    ind_1h = state.ind_1h
+    if not ind_1h:
+        return None
+
+    ma_1h = ind_1h.get("ma_alignment", "neutral")
+    adx_1h = ind_1h.get("adx", 0) or 0
+    if adx_1h < 20:
+        return None
+
+    df_1h = ind_1h.get("df")
+    close_5m = state.ind.get("close")
+    atr_5m = state.ind.get("atr") or 1
+    if df_1h is None or len(df_1h) < 20 or not close_5m:
+        return None
+
+    levels = find_swing_levels(df_1h, lookback=50)
+    pinbar = state.ind.get("pinbar")
+    vr_5m = state.ind.get("volume_ratio") or 1
+    body_dir = state.ind.get("body_dir")
+    body_pct = state.ind.get("body_pct", 0)
+    rsi_5m = state.ind.get("rsi")
+
+    for lvl in levels:
+        if lvl.touch_count < 2:
+            continue
+        dist = abs(close_5m - lvl.price)
+
+        # ── 做多: 1H多头 + 5m回踩到1H支撑 + 反转确认 ──
+        if ma_1h == "bullish" and lvl.side == "support" and dist <= atr_5m * 1.2:
+            reversal = False
+            rev_type = ""
+            if pinbar == "bullish":
+                reversal = True
+                rev_type = "Pinbar"
+            elif rsi_5m is not None and rsi_5m < 40 and body_dir == "bullish" and body_pct > 0.3:
+                reversal = True
+                rev_type = f"RSI{rsi_5m:.0f}+阳线"
+            if reversal:
+                conf = 0.78 if pinbar == "bullish" else 0.70
+                sev = "critical" if dist <= atr_5m * 0.5 else "high"
+                return {
+                    "direction": "long",
+                    "severity": sev,
+                    "confidence": conf,
+                    "evidence": f"趋势回调多 1H支撑{lvl.price:.5g}({lvl.touch_count}触) {rev_type}",
+                }
+
+        # ── 做空: 1H空头 + 5m反弹到1H阻力 + 反转确认 ──
+        elif ma_1h == "bearish" and lvl.side == "resistance" and dist <= atr_5m * 1.2:
+            reversal = False
+            rev_type = ""
+            if pinbar == "bearish":
+                reversal = True
+                rev_type = "Pinbar"
+            elif rsi_5m is not None and rsi_5m > 60 and body_dir == "bearish" and body_pct > 0.3:
+                reversal = True
+                rev_type = f"RSI{rsi_5m:.0f}+阴线"
+            if reversal:
+                conf = 0.78 if pinbar == "bearish" else 0.70
+                sev = "critical" if dist <= atr_5m * 0.5 else "high"
+                return {
+                    "direction": "short",
+                    "severity": sev,
+                    "confidence": conf,
+                    "evidence": f"趋势回调空 1H阻力{lvl.price:.5g}({lvl.touch_count}触) {rev_type}",
+                }
+
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 信号注册表
 # ═══════════════════════════════════════════════════════════════════════
 
 SIGNALS: list[SignalDef] = [
-    SignalDef("breakout",    "防线突破",   _check_breakout,     {},                    "突破", "trend"),
-    SignalDef("fakeout",     "假突破反转", _check_fakeout,      {},                    "假破", "any"),
-    SignalDef("retest",      "回踩确认",   _check_retest,       {},                    "回踩", "any"),
-    SignalDef("rsi_extreme", "RSI极值",    _check_rsi_extreme,  {"oversold": 25, "overbot": 75}, "RSI", "range"),
-    SignalDef("volume_spike","放量异动",   _check_volume_spike, {"threshold": 3.0, "min_price_change": 0.5}, "VOL", "any"),
-    SignalDef("rs_strength", "RS强势",     _check_rs_strength,  {"score_threshold": 30}, "RS", "any"),
-    SignalDef("rs_weakness", "RS弱势",     _check_rs_weakness,  {"score_threshold": 30}, "RS", "any"),
+    SignalDef("breakout",        "防线突破",   _check_breakout,        {},                    "突破", "trend"),
+    SignalDef("fakeout",         "假突破反转", _check_fakeout,         {},                    "假破", "any"),
+    SignalDef("retest",          "回踩确认",   _check_retest,          {},                    "回踩", "any"),
+    SignalDef("rsi_extreme",     "RSI极值",    _check_rsi_extreme,     {"oversold": 25, "overbot": 75}, "RSI", "range"),
+    SignalDef("volume_spike",    "放量异动",   _check_volume_spike,    {"threshold": 3.0, "min_price_change": 0.5}, "VOL", "any"),
+    SignalDef("rs_strength",     "RS强势",     _check_rs_strength,     {"score_threshold": 30}, "RS", "any"),
+    SignalDef("rs_weakness",     "RS弱势",     _check_rs_weakness,     {"score_threshold": 30}, "RS", "any"),
+    SignalDef("trend_pullback",  "趋势回调",   _check_trend_pullback,  {},                    "回调", "trend"),
 ]
 
 
