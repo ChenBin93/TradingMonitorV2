@@ -1,13 +1,8 @@
-# 技术指标计算
-# 从 V1 src/signals/indicators.py 复用
-
 import pandas as pd
 import numpy as np
 
 
 def compute(df: pd.DataFrame, params: dict) -> dict | None:
-    """计算所有技术指标，返回 dict"""
-
     if df is None or len(df) < 30:
         return None
 
@@ -24,29 +19,11 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
     ma5, ma20, ma60 = mas[f"ma_{ma_s}"], mas[f"ma_{ma_m}"], mas[f"ma_{ma_l}"]
     vol_ma = _calc_vol_ma(df, params.get("volume_ma_period", 20))
     vol_ratio = _calc_vol_ratio(df, vol_ma)
-    macd_line, signal_line, histogram = _calc_macd(df)
-    ma_converge = _calc_ma_converge(df, atr, ma5, ma20, ma60)
     ttm_squeeze = _calc_ttm_squeeze(df)
-    rsi_div = _detect_rsi_divergence(df, rsi)
-    macd_div = _detect_macd_divergence(df, macd_line, signal_line)
-    vol_breakout = _check_vol_breakout(df, vol_ma, vol_ratio)
 
     idx = len(df) - 1
     v = lambda s: s.iloc[idx] if len(s) > idx and s.iloc[idx] == s.iloc[idx] else None
 
-    prev_h = histogram.iloc[idx - 1] if idx > 0 and not np.isnan(histogram.iloc[idx - 1]) else 0
-    curr_h = v(histogram) or 0
-    if prev_h <= 0 < curr_h:
-        macd_cross = "golden"
-    elif prev_h >= 0 > curr_h:
-        macd_cross = "death"
-    else:
-        macd_cross = None
-
-    # 布林带宽度短期百分位 (最近 20 根 K 线内)
-    bb_short_pct = _local_percentile(bb_width, lookback=20)
-
-    # K线实体与形态
     o, h, l, c = df["open"].iloc[idx], df["high"].iloc[idx], df["low"].iloc[idx], df["close"].iloc[idx]
     body_top = max(o, c)
     body_bottom = min(o, c)
@@ -65,28 +42,28 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
             pinbar = "bearish"
 
     return {
-        "close": v(df["close"]), "roc": v(roc), "rsi": v(rsi), "adx": v(adx),
-        "plus_di": v(plus_di), "minus_di": v(minus_di),
-        "bb_width": v(bb_width), "bb_width_short_pct": bb_short_pct, "atr": v(atr),
-        "volume_ratio": v(vol_ratio), "ma5": v(ma5), "ma20": v(ma20), "ma60": v(ma60),
-        "ma_converge": ma_converge, "macd_hist": v(histogram), "macd_cross": macd_cross,
-        "macd_line": v(macd_line), "signal_line": v(signal_line),
-        "ttm_squeeze": ttm_squeeze, "rsi_divergence": rsi_div,
-        "macd_divergence": macd_div, "volume_breakout": vol_breakout,
-        # 新增：结构判断
+        "close": v(df["close"]),
+        "roc": v(roc),
+        "rsi": v(rsi),
+        "adx": v(adx),
+        "plus_di": v(plus_di),
+        "minus_di": v(minus_di),
+        "bb_width": v(bb_width),
+        "atr": v(atr),
+        "volume_ratio": v(vol_ratio),
+        "ma5": v(ma5),
+        "ma20": v(ma20),
+        "ma60": v(ma60),
         "ma_alignment": _ma_alignment(ma5, ma20, ma60),
         "bb_state": _bb_state(bb_width) if len(bb_width) > 10 else "unknown",
-        "price_vs_ma60": "above" if v(df["close"]) and v(ma60) and v(df["close"]) > v(ma60) else "below",
         "compression_bars": _count_compression_bars(df),
-        "adx_trend": "up" if len(adx) > 5 and adx.iloc[-1] > adx.iloc[-5] else "down",
+        "ttm_squeeze": ttm_squeeze,
         "pinbar": pinbar,
         "body_pct": body_pct,
         "body_dir": body_dir,
         "df": df,
     }
 
-
-# --- 基础指标 ---
 
 def _calc_roc(df, period):
     if len(df) < period + 1:
@@ -145,22 +122,6 @@ def _calc_vol_ratio(df, vol_ma):
     return df["volume"] / vol_ma
 
 
-def _calc_macd(df, fast=12, slow=26, signal=9):
-    ema_f = df["close"].ewm(span=fast, adjust=False).mean()
-    ema_s = df["close"].ewm(span=slow, adjust=False).mean()
-    line = ema_f - ema_s
-    sig = line.ewm(span=signal, adjust=False).mean()
-    return line, sig, line - sig
-
-
-def _calc_ma_converge(df, atr, ma5, ma20, ma60):
-    try:
-        d = abs(df["close"].iloc[-1] - ma5.iloc[-1]) + abs(ma5.iloc[-1] - ma20.iloc[-1]) + abs(ma20.iloc[-1] - ma60.iloc[-1])
-        return min(d / (atr.iloc[-1] * 3), 10.0)
-    except Exception:
-        return 0.0
-
-
 def _calc_ttm_squeeze(df, bb_period=20, bb_std=2, kc_period=20, kc_mul=1.5, min_bars=5):
     try:
         mid = df["close"].rolling(bb_period).mean()
@@ -189,51 +150,6 @@ def _calc_ttm_squeeze(df, bb_period=20, bb_std=2, kc_period=20, kc_mul=1.5, min_
         return None
 
 
-def _detect_rsi_divergence(df, rsi, pl=5, pr=5, min_dist=2.0):
-    try:
-        lookback = pl + pr + 1
-        p = df["close"].tail(lookback).values
-        r = rsi.tail(lookback).values
-        pp, rp = p[pl], r[pl]
-        pr_min, pr_max = np.min(p[pl + 1:]), np.max(p[pl + 1:])
-        dist = abs(pr_max - pr_min) / pr_max * 100 if pr_max != 0 else 0
-        div = None
-        if dist >= min_dist:
-            if pr_min < pp and np.min(r[:pl]) > rp: div = "bullish"
-            elif pr_max > pp and np.max(r[:pl]) < rp: div = "bearish"
-        return {"divergence": div, "rsi_value": float(rp), "price_distance_pct": round(dist, 2)}
-    except Exception:
-        return None
-
-
-def _detect_macd_divergence(df, macd_line, signal_line, pl=5, pr=5, min_dist=2.0):
-    try:
-        lookback = pl + pr + 1
-        p = df["close"].tail(lookback).values
-        m = macd_line.tail(lookback).values
-        pp, mp = p[pl], m[pl]
-        pr_min, pr_max = np.min(p[pl + 1:]), np.max(p[pl + 1:])
-        dist = abs(pr_max - pr_min) / pr_max * 100 if pr_max != 0 else 0
-        div = None
-        if dist >= min_dist:
-            if pr_min < pp and mp > np.min(m[:pl]): div = "bullish"
-            elif pr_max > pp and mp < np.max(m[:pl]): div = "bearish"
-        return {"divergence": div, "macd_value": float(mp), "price_distance_pct": round(dist, 2)}
-    except Exception:
-        return None
-
-
-def _check_vol_breakout(df, vol_ma, vol_ratio, threshold=1.5):
-    try:
-        return {
-            "confirmed": vol_ratio.iloc[-1] >= threshold,
-            "vol_ratio": float(vol_ratio.iloc[-1]),
-            "price_change_pct": round(abs(df["close"].iloc[-1] - df["close"].iloc[-2]) / df["close"].iloc[-2] * 100, 2),
-        }
-    except Exception:
-        return None
-
-
 def _ma_alignment(ma5, ma20, ma60) -> str:
     try:
         if ma5.iloc[-1] > ma20.iloc[-1] > ma60.iloc[-1]:
@@ -246,7 +162,6 @@ def _ma_alignment(ma5, ma20, ma60) -> str:
 
 
 def _bb_state(bb_width) -> str:
-    """判断布林带状态：expanding(扩张) / contracting(收缩) / flat(平直)"""
     try:
         recent = bb_width.iloc[-10:]
         first_half = recent.iloc[:5].mean()
@@ -261,13 +176,13 @@ def _bb_state(bb_width) -> str:
 
 
 def _count_compression_bars(df) -> int:
-    """统计最近连续小实体 K 线根数（压缩)"""
     try:
         count = 0
         closes = df["close"].values
         for i in range(len(df) - 1, -1, -1):
             body = abs(closes[i] - df["open"].values[i])
-            avg_body = np.mean(abs(np.diff(closes[max(0, i-20):i+1]))) if i > 5 else body
+            start = max(0, i - 20)
+            avg_body = np.mean(abs(np.diff(closes[start:i+1]))) if i > 5 else body
             if avg_body > 0 and body < avg_body * 0.6:
                 count += 1
             else:
@@ -275,17 +190,3 @@ def _count_compression_bars(df) -> int:
         return count
     except Exception:
         return 0
-
-
-def _local_percentile(series, lookback: int = 20) -> float | None:
-    """计算最近 lookback 根 K 线内的百分位 (0-100, 越小越压缩)"""
-    try:
-        recent = series.tail(lookback).dropna()
-        if len(recent) < 5:
-            return None
-        current = series.iloc[-1]
-        if pd.isna(current):
-            return None
-        return float((recent < current).sum() / len(recent) * 100)
-    except Exception:
-        return None

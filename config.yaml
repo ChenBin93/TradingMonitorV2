@@ -1,10 +1,9 @@
 timeframes:
-- 15m
+- 5m
 - 1h
-- 4h
-scan_interval: 900
+scan_interval: 300
 indicators:
-  15m:
+  5m:
     roc_period: 5
     rsi_period: 14
     adx_period: 14
@@ -26,21 +25,14 @@ indicators:
     ma_short: 5
     ma_mid: 20
     ma_long: 60
-  4h:
-    roc_period: 20
-    rsi_period: 14
-    adx_period: 14
-    bb_period: 20
-    bb_std: 2
-    atr_period: 14
-    volume_ma_period: 20
-    ma_short: 5
-    ma_mid: 20
-    ma_long: 60
 alert:
-  dedup_minutes: 15
+  dedup_minutes: 30
   min_confidence: 0.65
   us_market_hours: 13:30-21:00
+rs:
+  momentum_period: 5
+  rank_threshold: 0.2
+  min_deviation_pct: 1.0
 history:
   lookback_days:
   - 90
@@ -66,62 +58,28 @@ account:
   leverage: 10
 watchlist:
 - BTC/USDT:USDT
+- ETH/USDT:USDT
+- SOL/USDT:USDT
 - BNB/USDT:USDT
-- BZ/USDT:USDT
-- OKB/USDT:USDT
-- APE/USDT:USDT
-- BERA/USDT:USDT
-- ZEC/USDT:USDT
-- AR/USDT:USDT
-- SNDK/USDT:USDT
-- YFI/USDT:USDT
-- UNI/USDT:USDT
-- NMR/USDT:USDT
+- SUI/USDT:USDT
 - TON/USDT:USDT
-- CRCL/USDT:USDT
-- DASH/USDT:USDT
-- RIVER/USDT:USDT
-- TRUMP/USDT:USDT
-- TAO/USDT:USDT
 - INJ/USDT:USDT
-- COMP/USDT:USDT
-- ORDI/USDT:USDT
-- GIGGLE/USDT:USDT
+- TAO/USDT:USDT
+- ICP/USDT:USDT
+- ONDO/USDT:USDT
+- HYPE/USDT:USDT
+- BERA/USDT:USDT
+- APE/USDT:USDT
+- TRUMP/USDT:USDT
+- UNI/USDT:USDT
 - AXS/USDT:USDT
 - BCH/USDT:USDT
-- SUI/USDT:USDT
-- BSB/USDT:USDT
-- BIO/USDT:USDT
-- EDEN/USDT:USDT
-- HYPE/USDT:USDT
-- ICP/USDT:USDT
+- COMP/USDT:USDT
 - LIT/USDT:USDT
-- ONDO/USDT:USDT
-# 贵金属
+- ORDI/USDT:USDT
+- ZEC/USDT:USDT
+- DASH/USDT:USDT
+- AR/USDT:USDT
+- YFI/USDT:USDT
 - XAU/USDT:USDT
 - XAG/USDT:USDT
-- XPT/USDT:USDT
-- XPD/USDT:USDT
-- XCU/USDT:USDT
-# 美股代币化
-- NVDA/USDT:USDT
-- TSLA/USDT:USDT
-- INTC/USDT:USDT
-- MU/USDT:USDT
-- AMD/USDT:USDT
-- GOOGL/USDT:USDT
-- RKLB/USDT:USDT
-- ORCL/USDT:USDT
-- WDC/USDT:USDT
-- AAPL/USDT:USDT
-- MRVL/USDT:USDT
-- TSM/USDT:USDT
-- HOOD/USDT:USDT
-- PLTR/USDT:USDT
-- META/USDT:USDT
-- MSFT/USDT:USDT
-- AMZN/USDT:USDT
-- QQQ/USDT:USDT
-- SPY/USDT:USDT
-# ETF
-- EWY/USDT:USDT
