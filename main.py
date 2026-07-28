@@ -2,7 +2,6 @@ import asyncio
 import signal
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -891,21 +890,20 @@ async def async_main():
 
     # ── 并行预填 ──
     async def _parallel_prefill(okx_client, syms, tfs, kcache, limit=200):
-        def _fetch(s, t):
-            try:
-                return s, t, okx_client.fetch_ohlcv(s, t, limit=limit)
-            except Exception:
-                return s, t, []
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=10) as pool:
-            futures = [loop.run_in_executor(pool, _fetch, s, t) for s in syms for t in tfs]
-            for batch in await asyncio.gather(*futures):
-                s, t, bars = batch
-                for bar in bars:
-                    kcache.update(s, t, Candle(
-                        timestamp=bar["timestamp"], open=bar["open"],
-                        high=bar["high"], low=bar["low"],
-                        close=bar["close"], volume=bar["volume"]))
+        sem = asyncio.Semaphore(5)
+        async def _fetch(s, t):
+            async with sem:
+                try:
+                    bars = await asyncio.get_event_loop().run_in_executor(
+                        None, okx_client.fetch_ohlcv, s, t, limit)
+                    for bar in bars:
+                        kcache.update(s, t, Candle(
+                            timestamp=bar["timestamp"], open=bar["open"],
+                            high=bar["high"], low=bar["low"],
+                            close=bar["close"], volume=bar["volume"]))
+                except Exception as e:
+                    logger.warning(f"Prefill {s} {t}: {e}")
+        await asyncio.gather(*[_fetch(s, t) for s in syms for t in tfs])
 
     await _parallel_prefill(okx, symbols, timeframes, cache)
     logger.info("Cache prefill done")
@@ -942,24 +940,24 @@ async def async_main():
     scan_count = 0
 
     async def _refresh_cache_if_stale():
-        def _fetch(s, t):
-            try:
-                return s, t, okx.fetch_ohlcv(s, t, limit=5)
-            except Exception:
-                return s, t, []
-        loop = asyncio.get_event_loop()
+        sem = asyncio.Semaphore(5)
         refreshed = 0
-        with ThreadPoolExecutor(max_workers=10) as pool:
-            futures = [loop.run_in_executor(pool, _fetch, s, t) for s in symbols for t in timeframes]
-            for batch in await asyncio.gather(*futures):
-                s, t, bars = batch
-                for bar in bars:
-                    cache.update(s, t, Candle(
-                        timestamp=bar["timestamp"], open=bar["open"],
-                        high=bar["high"], low=bar["low"],
-                        close=bar["close"], volume=bar["volume"]))
-                if bars:
-                    refreshed += 1
+        async def _fetch(s, t):
+            nonlocal refreshed
+            async with sem:
+                try:
+                    bars = await asyncio.get_event_loop().run_in_executor(
+                        None, okx.fetch_ohlcv, s, t, 5)
+                    for bar in bars:
+                        cache.update(s, t, Candle(
+                            timestamp=bar["timestamp"], open=bar["open"],
+                            high=bar["high"], low=bar["low"],
+                            close=bar["close"], volume=bar["volume"]))
+                    if bars:
+                        refreshed += 1
+                except Exception:
+                    pass
+        await asyncio.gather(*[_fetch(s, t) for s in symbols for t in timeframes])
         if refreshed > 0:
             logger.debug(f"REST cache refresh: {refreshed} bars")
 
