@@ -12,6 +12,7 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
     plus_di, minus_di = _calc_di(df, params.get("adx_period", 14))
     bb_mid, bb_width = _calc_bb(df, params.get("bb_period", 20), params.get("bb_std", 2))
     atr = _calc_atr(df, params.get("atr_period", 14))
+    atr_rs = _calc_atr(df, 50)
     ma_s = params.get("ma_short", 5)
     ma_m = params.get("ma_mid", 20)
     ma_l = params.get("ma_long", 60)
@@ -50,6 +51,7 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
         "minus_di": v(minus_di),
         "bb_width": v(bb_width),
         "atr": v(atr),
+        "atr_rs": v(atr_rs),
         "volume_ratio": v(vol_ratio),
         "ma5": v(ma5),
         "ma20": v(ma20),

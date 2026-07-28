@@ -399,7 +399,7 @@ def do_scan(
             ind = tf_ind.get(tf, {})
             if ind:
                 tf_close[tf][sym] = ind.get("close")
-                tf_atr[tf][sym] = ind.get("atr")
+                tf_atr[tf][sym] = ind.get("atr_rs")
                 df = ind.get("df")
                 if df is not None and len(df) > momentum_period:
                     tf_prev[tf][sym] = df["close"].iloc[-momentum_period - 1]
