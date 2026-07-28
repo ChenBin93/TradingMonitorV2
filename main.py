@@ -737,48 +737,37 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             alert.details["setup"] = True
             check.append("✅成型·Pinbar")
 
-    # ── 多周期 RS 评分 ──
+    # ── 多周期 RS 独立评分 ──
     rs_dict = alert.details.get("rs_scores", {})
     if rs_dict:
-        parts = []
-        rs_5m_score = rs_dict.get("5m", {}).get("score", 0)
-        rs_1h_score = rs_dict.get("1h", {}).get("score", 0)
-        rs_4h_score = rs_dict.get("4h", {}).get("score", 0)
-
-        # 显示: TF图标+评分
         level_label = {"strong": "🟢", "mild_strong": "🔵", "neutral": "⚪", "mild_weak": "🟠", "weak": "🔴"}
+        parts = []
+        marks = []
         for tf_display, tf_key in [("5m", "5m"), ("1H", "1h"), ("4H", "4h")]:
             d = rs_dict.get(tf_key, {})
-            if d:
-                score = d.get("score", 0)
-                icon = level_label.get(d.get("level", ""), "")
-                parts.append(f"{icon}{score:+.0f}")
+            if not d:
+                continue
+            score = d.get("score", 0)
+            icon = level_label.get(d.get("level", ""), "")
+            parts.append(f"{icon}{tf_display}{score:+.0f}")
+            marks.append(score)
+
         alert.meta["rs"] = " ".join(parts) if parts else ""
 
-        # 加权合并: 5m×0.5 + 1h×0.3 + 4h×0.2
-        tf_scores = []
-        if rs_5m_score: tf_scores.append((rs_5m_score, 0.5))
-        if rs_1h_score: tf_scores.append((rs_1h_score, 0.3))
-        if rs_4h_score: tf_scores.append((rs_4h_score, 0.2))
-        merged_score = sum(s * w for s, w in tf_scores) / sum(w for _, w in tf_scores) if tf_scores else 0
-        same_direction = all(s > 0 for s, _ in tf_scores) or all(s < 0 for s, _ in tf_scores)
-    else:
-        rs_5m_score = 0
-        merged_score = 0
-        same_direction = False
-
-    if alert.signal_type in ("rs_strength", "rs_weakness"):
-        pass
-    elif alert.direction == "long" and merged_score > 0:
-        boost = min(abs(merged_score) * 0.002, 0.15)
-        if same_direction and len(tf_scores) >= 2:
-            boost *= 1.3
-        alert.confidence = min(alert.confidence + boost, 1.0)
-    elif alert.direction == "short" and merged_score < 0:
-        boost = min(abs(merged_score) * 0.002, 0.15)
-        if same_direction and len(tf_scores) >= 2:
-            boost *= 1.3
-        alert.confidence = min(alert.confidence + boost, 1.0)
+        # 每周期独立增强: 方向与信号匹配的 TF 越多, 置信度越高
+        if alert.signal_type not in ("rs_strength", "rs_weakness"):
+            agree_count = 0
+            for s in marks:
+                if (alert.direction == "long" and s > 0) or (alert.direction == "short" and s < 0):
+                    agree_count += 1
+            if agree_count >= 3:
+                alert.confidence = min(alert.confidence * 1.15, 1.0)
+                check.append("✓RS三重")
+            elif agree_count >= 2:
+                alert.confidence = min(alert.confidence * 1.10, 1.0)
+                check.append("✓RS双周期")
+            elif agree_count >= 1:
+                alert.confidence = min(alert.confidence * 1.05, 1.0)
 
     # ── 量能耗尽 ──
     body_pct_5m = ind_5m.get("body_pct", 1)
