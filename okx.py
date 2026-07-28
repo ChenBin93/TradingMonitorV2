@@ -112,18 +112,33 @@ class OKXClient:
         return result
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
-        ohlcv = self._exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-        return [{
-            "timestamp": datetime.fromtimestamp(c[0] / 1000),
-            "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5],
-        } for c in ohlcv]
+        import requests
+        inst_id = symbol.replace("/", "-").replace(":USDT", "-SWAP")
+        bar_map = {"5m": "5m", "1h": "1H", "4h": "4H", "15m": "15m"}
+        bar = bar_map.get(timeframe, timeframe)
+        params = {"instId": inst_id, "bar": bar, "limit": str(limit)}
+        resp = requests.get(
+            "https://www.okx.com/api/v5/market/candles",
+            params=params, timeout=15)
+        data = resp.json()
+        if data.get("code") != "0" or not data.get("data"):
+            logger.warning(f"fetch_ohlcv failed for {symbol} {timeframe}: {data.get('msg', '')}")
+            return []
+        bars = []
+        for b in reversed(data["data"]):
+            bars.append({
+                "timestamp": datetime.fromtimestamp(int(b[0]) / 1000),
+                "open": float(b[1]), "high": float(b[2]),
+                "low": float(b[3]), "close": float(b[4]), "volume": float(b[5]),
+            })
+        return bars
 
     def fetch_ohlcv_extended(self, symbol: str, timeframe: str, min_bars: int = 500) -> list[dict]:
         """迭代下载历史 K 线，使用 OKX REST API 直接分页"""
         import time, requests
 
         inst_id = symbol.replace("/", "-").replace(":USDT", "-SWAP")
-        bar_map = {"15m": "15m", "1h": "1H", "4h": "4H"}
+        bar_map = {"15m": "15m", "1h": "1H", "4h": "4H", "5m": "5m"}
         bar = bar_map.get(timeframe, timeframe)
 
         all_bars = []
