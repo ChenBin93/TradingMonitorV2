@@ -1,6 +1,7 @@
 timeframes:
 - 5m
 - 1h
+- 4h
 scan_interval: 300
 indicators:
   5m:
@@ -25,14 +26,19 @@ indicators:
     ma_short: 5
     ma_mid: 20
     ma_long: 60
-alert:
-  dedup_minutes: 30
-  min_confidence: 0.65
-  us_market_hours: 13:30-21:00
+  4h:
+    roc_period: 20
+    rsi_period: 14
+    adx_period: 14
+    bb_period: 20
+    bb_std: 2
+    atr_period: 14
+    volume_ma_period: 20
+    ma_short: 5
+    ma_mid: 20
+    ma_long: 60
 rs:
   momentum_period: 5
-  rank_threshold: 0.2
-  min_deviation_pct: 1.0
 history:
   lookback_days:
   - 90

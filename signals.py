@@ -14,8 +14,8 @@ class SignalState:
     regime: str = "unknown"
     direction: str = "neutral"
     params: dict = field(default_factory=dict)
-    rs_score: float = 0.0
-    rs_level: str = "neutral"
+    rs_scores: dict[str, dict] = field(default_factory=dict)
+    # rs_scores = {"5m": {"score": 50, "level": "strong", "zscore": 3.0}, "1h": {...}, "4h": {...}}
 
 
 @dataclass
@@ -190,27 +190,31 @@ def _check_volume_spike(state: SignalState) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════════
 
 def _check_rs_strength(state: SignalState) -> dict | None:
-    score = state.rs_score
+    rs5 = state.rs_scores.get("5m", {})
+    score = rs5.get("score", 0)
     threshold = state.params.get("score_threshold", 30)
     if score < threshold:
         return None
     sev = "critical" if score >= 60 else "high"
     return {"direction": "long", "severity": sev,
             "confidence": min(0.65 + score * 0.004, 0.95),
-            "evidence": f"RS强势 评分{score:.0f}",
-            "rs_score": score}
+            "evidence": f"RS强势 5m:{score:.0f}",
+            "rs_5m_score": score,
+            "rs_scores": state.rs_scores}
 
 
 def _check_rs_weakness(state: SignalState) -> dict | None:
-    score = state.rs_score
+    rs5 = state.rs_scores.get("5m", {})
+    score = rs5.get("score", 0)
     threshold = state.params.get("score_threshold", 30)
     if score > -threshold:
         return None
     sev = "critical" if score <= -60 else "high"
     return {"direction": "short", "severity": sev,
             "confidence": min(0.65 + abs(score) * 0.004, 0.95),
-            "evidence": f"RS弱势 评分{score:.0f}",
-            "rs_score": score}
+            "evidence": f"RS弱势 5m:{score:.0f}",
+            "rs_5m_score": score,
+            "rs_scores": state.rs_scores}
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -136,11 +136,11 @@ class AlertFilter:
             vr = d.get("volume_ratio", 1)
             if vr >= 5: conf += 0.10
         elif a.signal_type == "rs_strength":
-            score = d.get("rs_score", 0)
-            if score >= 60: conf += 0.10
+            rs_5m = d.get("rs_5m_score", 0)
+            if rs_5m >= 60: conf += 0.10
         elif a.signal_type == "rs_weakness":
-            score = d.get("rs_score", 0)
-            if score <= -60: conf += 0.10
+            rs_5m = d.get("rs_5m_score", 0)
+            if rs_5m <= -60: conf += 0.10
 
         return min(conf, 1.0)
 
@@ -196,8 +196,8 @@ def rank_symbols(alerts: list[Alert], all_ind: dict[str, dict[str, dict]]) -> li
             s["volume"] = max(s["volume"], min(vr / 3, 1))
 
         if a.signal_type in ("rs_strength", "rs_weakness"):
-            rs_val = a.details.get("rs_score", 0)
-            s["momentum"] = max(s["momentum"], min(abs(rs_val) / 60, 1))
+            rs_5m = a.details.get("rs_5m_score", 0)
+            s["momentum"] = max(s["momentum"], min(abs(rs_5m) / 60, 1))
 
         tf_data = all_ind.get(a.symbol, {})
         ind_1h = tf_data.get("1h", {})
@@ -375,10 +375,10 @@ def do_scan(
     rs_cfg = config.get("rs", {})
     momentum_period = rs_cfg.get("momentum_period", 5)
 
-    # ── 第一遍：收集所有 TF 的指标 ──
-    sym_5m_close: dict[str, float | None] = {}
-    sym_5m_prev_close: dict[str, float | None] = {}
-    sym_5m_atr: dict[str, float | None] = {}
+    # ── 第一遍：收集所有 TF 的指标 + RS 数据 ──
+    tf_close: dict[str, dict[str, float | None]] = {tf: {} for tf in timeframes}
+    tf_prev: dict[str, dict[str, float | None]] = {tf: {} for tf in timeframes}
+    tf_atr: dict[str, dict[str, float | None]] = {tf: {} for tf in timeframes}
 
     for sym in symbols:
         tf_ind: dict[str, dict] = {}
@@ -395,34 +395,46 @@ def do_scan(
             continue
         all_ind[sym] = tf_ind
 
-        ind_5m = tf_ind.get("5m", {})
-        if ind_5m:
-            sym_5m_close[sym] = ind_5m.get("close")
-            sym_5m_atr[sym] = ind_5m.get("atr")
-            df_5m = ind_5m.get("df")
-            if df_5m is not None and len(df_5m) > momentum_period:
-                sym_5m_prev_close[sym] = df_5m["close"].iloc[-momentum_period - 1]
+        for tf in timeframes:
+            ind = tf_ind.get(tf, {})
+            if ind:
+                tf_close[tf][sym] = ind.get("close")
+                tf_atr[tf][sym] = ind.get("atr")
+                df = ind.get("df")
+                if df is not None and len(df) > momentum_period:
+                    tf_prev[tf][sym] = df["close"].iloc[-momentum_period - 1]
 
-    # ── RS 计算 ──
-    btc_close = sym_5m_close.get("BTC/USDT:USDT")
-    btc_prev_close = sym_5m_prev_close.get("BTC/USDT:USDT")
-    btc_atr = sym_5m_atr.get("BTC/USDT:USDT")
-    rs_results = compute_rs(sym_5m_close, sym_5m_prev_close, sym_5m_atr,
-                            btc_close, btc_prev_close, btc_atr, momentum_period)
+    # ── 多周期 RS 计算 ──
+    btc_symbol = "BTC/USDT:USDT"
+    rs_by_tf: dict[str, dict[str, object]] = {}
+    for tf in timeframes:
+        btc_close = tf_close[tf].get(btc_symbol)
+        btc_prev = tf_prev[tf].get(btc_symbol)
+        btc_atr = tf_atr[tf].get(btc_symbol)
+        rs_by_tf[tf] = compute_rs(tf_close[tf], tf_prev[tf], tf_atr[tf],
+                                  btc_close, btc_prev, btc_atr, momentum_period)
 
-    # ── 第二遍：逐 TF 检查信号（1H 仅做方向锚）──
+    # ── 汇总每个 symbol 的多周期 RS ──
+    rs_scores_all: dict[str, dict[str, dict]] = {}
+    for sym in all_ind:
+        rs_scores_all[sym] = {}
+        for tf in timeframes:
+            r = rs_by_tf[tf].get(sym)
+            if r:
+                rs_scores_all[sym][tf] = {"score": r.rs_score, "level": r.rs_level,
+                                           "zscore": r.rs_zscore, "momentum": r.rs_momentum}
+
+    # ── 第二遍：逐 TF 检查信号（1H/4H 仅做方向锚）──
     for sym, tf_ind in all_ind.items():
         for tf, ind in tf_ind.items():
-            if tf == "1h":
+            if tf in ("1h", "4h"):
                 continue
             direction = get_direction(ind)
             regime = get_regime(ind)
-            rs = rs_results.get(sym)
             state = SignalState(
                 symbol=sym, timeframe=tf, ind=ind,
                 regime=regime, direction=direction,
-                rs_score=rs.rs_score if rs else 0.0,
-                rs_level=rs.rs_level if rs else "neutral",
+                rs_scores=rs_scores_all.get(sym, {}),
             )
 
             for sig_def in SIGNALS:
@@ -450,13 +462,10 @@ def do_scan(
 
         # ── 富化 ──
         sym_alerts = [a for a in alerts if a.symbol == sym]
-        rs = rs_results.get(sym)
-        if rs:
+        rs_dict = rs_scores_all.get(sym, {})
+        if rs_dict:
             for alert in sym_alerts:
-                alert.details.setdefault("rs_score", rs.rs_score)
-                alert.details.setdefault("rs_level", rs.rs_level)
-                alert.details.setdefault("rs_zscore", rs.rs_zscore)
-                alert.details.setdefault("rs_momentum", rs.rs_momentum)
+                alert.details.setdefault("rs_scores", rs_dict)
         for alert in sym_alerts:
             _enrich_alert(alert, tf_ind, sym, sym_alerts)
 
@@ -728,22 +737,47 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             alert.details["setup"] = True
             check.append("✅成型·Pinbar")
 
-    # ── RS 评分 ──
-    rs_score = alert.details.get("rs_score", 0)
-    rs_z = alert.details.get("rs_zscore", 0)
-    if rs_score != 0:
-        level_label = {"strong": "🟢强", "mild_strong": "🔵偏强", "neutral": "", "mild_weak": "🟠偏弱", "weak": "🔴弱"}
-        lvl = alert.details.get("rs_level", "")
-        label = level_label.get(lvl, "")
-        alert.meta["rs"] = f"{label}{rs_score:+.0f}({rs_z:+.1f}σ)"
+    # ── 多周期 RS 评分 ──
+    rs_dict = alert.details.get("rs_scores", {})
+    if rs_dict:
+        parts = []
+        rs_5m_score = rs_dict.get("5m", {}).get("score", 0)
+        rs_1h_score = rs_dict.get("1h", {}).get("score", 0)
+        rs_4h_score = rs_dict.get("4h", {}).get("score", 0)
+
+        # 显示: TF图标+评分
+        level_label = {"strong": "🟢", "mild_strong": "🔵", "neutral": "⚪", "mild_weak": "🟠", "weak": "🔴"}
+        for tf_display, tf_key in [("5m", "5m"), ("1H", "1h"), ("4H", "4h")]:
+            d = rs_dict.get(tf_key, {})
+            if d:
+                score = d.get("score", 0)
+                icon = level_label.get(d.get("level", ""), "")
+                parts.append(f"{icon}{score:+.0f}")
+        alert.meta["rs"] = " ".join(parts) if parts else ""
+
+        # 加权合并: 5m×0.5 + 1h×0.3 + 4h×0.2
+        tf_scores = []
+        if rs_5m_score: tf_scores.append((rs_5m_score, 0.5))
+        if rs_1h_score: tf_scores.append((rs_1h_score, 0.3))
+        if rs_4h_score: tf_scores.append((rs_4h_score, 0.2))
+        merged_score = sum(s * w for s, w in tf_scores) / sum(w for _, w in tf_scores) if tf_scores else 0
+        same_direction = all(s > 0 for s, _ in tf_scores) or all(s < 0 for s, _ in tf_scores)
+    else:
+        rs_5m_score = 0
+        merged_score = 0
+        same_direction = False
 
     if alert.signal_type in ("rs_strength", "rs_weakness"):
         pass
-    elif alert.direction == "long" and rs_score > 0:
-        boost = min(abs(rs_score) * 0.002, 0.15)
+    elif alert.direction == "long" and merged_score > 0:
+        boost = min(abs(merged_score) * 0.002, 0.15)
+        if same_direction and len(tf_scores) >= 2:
+            boost *= 1.3
         alert.confidence = min(alert.confidence + boost, 1.0)
-    elif alert.direction == "short" and rs_score < 0:
-        boost = min(abs(rs_score) * 0.002, 0.15)
+    elif alert.direction == "short" and merged_score < 0:
+        boost = min(abs(merged_score) * 0.002, 0.15)
+        if same_direction and len(tf_scores) >= 2:
+            boost *= 1.3
         alert.confidence = min(alert.confidence + boost, 1.0)
 
     # ── 量能耗尽 ──
@@ -958,19 +992,17 @@ def main():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    shutdown_flag = False
-
     def _shutdown(sig, frame):
-        nonlocal shutdown_flag
-        shutdown_flag = True
         logger.info(f"Signal {sig} received, shutting down...")
+        for task in asyncio.all_tasks(loop):
+            task.cancel()
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
     try:
         loop.run_until_complete(async_main())
-    except KeyboardInterrupt:
+    except asyncio.CancelledError:
         pass
     finally:
         loop.close()
