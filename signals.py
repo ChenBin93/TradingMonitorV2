@@ -313,6 +313,113 @@ def _check_trend_pullback(state: SignalState) -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 信号酝酿 — 提前告知哪些信号接近触发
+# ═══════════════════════════════════════════════════════════════════════
+
+def _brew_breakout(state: SignalState) -> dict | None:
+    df_sr = (state.ind_1h or {}).get("df") or state.ind.get("df")
+    close = state.ind.get("close")
+    atr = state.ind.get("atr") or 1
+    vr = state.ind.get("volume_ratio") or 1
+    adx = state.ind.get("adx", 0) or 0
+    if df_sr is None or not close:
+        return None
+    levels = find_swing_levels(df_sr, lookback=50)
+    near_sr = any(abs(close - l.price) <= atr * 2 and l.touch_count >= 2 for l in levels)
+    conds = {"近S/R": near_sr, "VR≥1.5": vr >= 1.5, "ADX≥25": adx >= 25}
+    met_list = [k for k, v in conds.items() if v]
+    missing_list = [k for k, v in conds.items() if not v]
+    if met_list:
+        return {"signal_id": "breakout", "signal_name": "防线突破", "met": len(met_list), "total": 3, "missing": missing_list[:1], "detail": ""}
+    return None
+
+
+def _brew_rsi(state: SignalState) -> dict | None:
+    rsi = state.ind.get("rsi")
+    body_dir = state.ind.get("body_dir")
+    if not rsi or not body_dir:
+        return None
+    rsi_near = (28 <= rsi <= 40 and body_dir == "bullish") or (60 <= rsi <= 72 and body_dir == "bearish")
+    if not rsi_near:
+        return None
+    close = state.ind.get("close")
+    atr = state.ind.get("atr") or 1
+    df_sr = (state.ind_1h or {}).get("df")
+    near_sr = False
+    if df_sr is not None and close:
+        levels = find_swing_levels(df_sr, lookback=50)
+        near_sr = any(abs(close - l.price) <= atr * 2 and l.touch_count >= 2 for l in levels)
+    tail = "→超卖" if rsi <= 40 else "→超买"
+    return {"signal_id": "rsi_extreme", "signal_name": "RSI极值", "met": 1, "total": 2, "missing": [] if near_sr else ["近S/R"], "detail": f"RSI={rsi:.0f}{tail}"}
+
+
+def _brew_volume(state: SignalState) -> dict | None:
+    vr = state.ind.get("volume_ratio") or 1
+    roc = state.ind.get("roc") or 0
+    conds = {"VR≥2": vr >= 2.0, "ROC≥0.3%": abs(roc) >= 0.3}
+    met_list = [k for k, v in conds.items() if v]
+    missing_list = [k for k, v in conds.items() if not v]
+    if met_list:
+        return {"signal_id": "volume_spike", "signal_name": "放量异动", "met": len(met_list), "total": 2, "missing": missing_list[:1], "detail": f"VR={vr:.1f}x ROC={roc:+.1f}%"}
+    return None
+
+
+def _brew_trend_pb(state: SignalState) -> dict | None:
+    ind_1h = state.ind_1h
+    if not ind_1h:
+        return None
+    ma_1h = ind_1h.get("ma_alignment", "neutral")
+    adx_1h = ind_1h.get("adx", 0) or 0
+    close = state.ind.get("close")
+    atr = state.ind.get("atr") or 1
+    if not close:
+        return None
+    trend_ok = (ma_1h in ("bullish", "bearish")) and adx_1h >= 18
+    df_1h = ind_1h.get("df")
+    near_sr = False
+    sr_side = ""
+    if df_1h is not None:
+        levels = find_swing_levels(df_1h, lookback=50)
+        for l in levels:
+            if l.touch_count < 2: continue
+            if ma_1h == "bullish" and l.side == "support" and abs(close - l.price) <= atr * 2:
+                near_sr = True; sr_side = "支撑"; break
+            if ma_1h == "bearish" and l.side == "resistance" and abs(close - l.price) <= atr * 2:
+                near_sr = True; sr_side = "阻力"; break
+    rsi = state.ind.get("rsi")
+    body_dir = state.ind.get("body_dir")
+    reversal = state.ind.get("pinbar") in ("bullish", "bearish")
+    if not reversal and rsi and body_dir:
+        if ma_1h == "bullish" and rsi < 45 and body_dir == "bullish":
+            reversal = True
+        elif ma_1h == "bearish" and rsi > 55 and body_dir == "bearish":
+            reversal = True
+    conds = {"1H趋势": trend_ok, "近防线": near_sr, "反转信号": reversal}
+    met_list = [k for k, v in conds.items() if v]
+    missing_list = [k for k, v in conds.items() if not v]
+    if met_list:
+        detail = f"1H{ma_1h}" if trend_ok else ""
+        detail += f" {sr_side}" if near_sr else ""
+        return {"signal_id": "trend_pullback", "signal_name": "趋势回调", "met": len(met_list), "total": 3, "missing": missing_list[:1], "detail": detail}
+    return None
+
+
+BREWERS = [_brew_breakout, _brew_rsi, _brew_volume, _brew_trend_pb]
+
+
+def check_brewing(state: SignalState) -> list[dict]:
+    results = []
+    for fn in BREWERS:
+        try:
+            r = fn(state)
+            if r:
+                results.append(r)
+        except Exception:
+            pass
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 信号注册表
 # ═══════════════════════════════════════════════════════════════════════
 

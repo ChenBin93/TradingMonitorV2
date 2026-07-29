@@ -12,7 +12,7 @@ from loguru import logger
 
 from okx import OKXClient, KlineCache, Candle
 from indicators import compute as compute_indicators
-from signals import SIGNALS, SignalState, get_direction, get_regime, is_compressing, check_warnings
+from signals import SIGNALS, SignalState, get_direction, get_regime, is_compressing, check_warnings, check_brewing
 from notify import Feishu
 from utils import setup_logging, start_health_server
 from support_resistance import find_swing_levels, get_nearest_levels
@@ -1163,6 +1163,7 @@ async def async_main():
     )
     scan_count = 0
     warn_buf: dict[str, list[dict]] = {}
+    brew_buf: dict[str, list[dict]] = {}
     first_scan = True
     signal_pool = SignalPool()
 
@@ -1267,9 +1268,23 @@ async def async_main():
                         cat_alerts, cat_ranks, len(alerts), len(symbols), scan_start,
                         category_label=cat_label)
                     feishu.send(report)
-                new_count = sum(1 for a in active if a.details.get("is_fresh"))
-                persist_count = len(active) - new_count
                 logger.info(f"Scan #{scan_count}: {len(active)} alerts ({new_count} new + {persist_count} persisted), {len(ranks)} ranked ({'/'.join(f'{k}:{len(v)}' for k,v in buckets.items())})")
+
+                # ── 酝酿报告 ──
+                if brew_buf:
+                    brew_lines = [f"\n📋 酝酿中:"]
+                    count = 0
+                    for sym, items in brew_buf.items():
+                        sym_short = sym.replace("-USDT-SWAP", "/USDT").split(":")[0]
+                        for b in items:
+                            missing_str = " 缺"+",".join(b.get("missing", [])) if b.get("missing") else ""
+                            detail = " "+b.get("detail", "") if b.get("detail") else ""
+                            brew_lines.append(f"{sym_short}  ⚠{b['signal_name']}({b['met']}/{b['total']}){missing_str}{detail}")
+                            count += 1
+                            if count >= 5: break
+                        if count >= 5: break
+                    feishu.send("\n".join(brew_lines))
+                    brew_buf.clear()
             else:
                 logger.info(f"Scan #{scan_count}: 0 push alerts (raw {len(alerts)} signals scanned)")
 
@@ -1287,6 +1302,9 @@ async def async_main():
                 ws = check_warnings(state)
                 if ws:
                     warn_buf[sym] = ws
+                bs = check_brewing(state)
+                if bs:
+                    brew_buf.setdefault(sym, []).extend(bs)
 
             # ── 30m 整点推送预警 (首次扫描立即推) ──
             now = datetime.utcnow()
