@@ -269,6 +269,8 @@ class OKXClient:
                             sym = self._parse_inst_id(arg.get("instId", ""))
                             tf = channel.replace("candle", "").lower()
                             for d in data.get("data", []):
+                                if len(d) > 8 and d[8] == "0":
+                                    continue
                                 candle = Candle(
                                     timestamp=datetime.fromtimestamp(int(d[0]) / 1000),
                                     open=float(d[1]), high=float(d[2]),
