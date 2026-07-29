@@ -227,6 +227,24 @@ def _is_us_stock(symbol: str) -> bool:
     return _US_STOCKS is not None and symbol in _US_STOCKS
 
 
+_SESSION_LABELS = [
+    (0, 7, "🌙", "亚洲"),
+    (7, 13, "🌅", "欧洲"),
+    (13, 21, "🌇", "美盘"),
+    (21, 24, "🌃", "低流动"),
+]
+
+def _current_session() -> str:
+    now = datetime.utcnow()
+    if now.weekday() >= 5:
+        return "🌃周末"
+    hour = now.hour + now.minute / 60.0
+    for start, end, icon, label in _SESSION_LABELS:
+        if start <= hour < end:
+            return f"{icon}{label}"
+    return "🌃低流动"
+
+
 def _is_us_market_hours() -> bool:
     try:
         now = datetime.now()
@@ -261,6 +279,7 @@ class SignalPool:
         self._pool: dict[str, Alert] = {}
         self._first_seen: dict[str, datetime] = {}
         self._fresh: set[str] = set()
+        self._rs_prev: dict[str, float] = {}
         self._lock = threading.RLock()
 
     @staticmethod
@@ -314,6 +333,12 @@ class SignalPool:
                 result.append(a)
             return sorted(result, key=lambda x: x.confidence, reverse=True)
 
+    def get_rs_delta(self, symbol: str, current: float) -> float | None:
+        with self._lock:
+            prev = self._rs_prev.get(symbol, None)
+            self._rs_prev[symbol] = current
+            return round(current - prev, 1) if prev is not None else None
+
     def is_fresh(self, a: Alert) -> bool:
         return self._key(a) in self._fresh
 
@@ -343,7 +368,9 @@ def fmt_short_alert(a: Alert) -> str:
     r = m.get("resistance", "-")
     checks = " ".join([c for c in a.checklist if c.startswith("✓") or c.startswith("⚠")][:4])
     rs = m.get("rs", "")
-    rs_str = f" RS:{rs}" if rs else ""
+    rs_delta = a.details.get("rs_delta")
+    rs_d_str = f"↑{rs_delta:+.0f}" if rs_delta and rs_delta > 0 else f"↓{rs_delta:+.0f}" if rs_delta and rs_delta < 0 else ""
+    rs_str = f" RS:{rs}{rs_d_str}" if rs else ""
     persist = "" if is_new else " 持续中"
 
     line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{timer}{rs_str}"
@@ -375,7 +402,7 @@ def format_warning_report(warnings: dict[str, list[dict]], scan_time: datetime) 
         "near_sr": "🔵", "coiling": "⚡", "rsi_approaching": "🟠", "rs_moving": "🔵",
     }
 
-    lines = [f"━━━ ⚡预警 {time_str} ━━━"]
+    lines = [f"━━━ ⚡预警 {time_str} {_current_session()} ━━━"]
     count = 0
     for sym, items in warnings.items():
         sym_short = sym.replace("-USDT-SWAP", "/USDT").split(":")[0]
@@ -444,7 +471,7 @@ def format_consolidated_report(
     longs = sum(1 for a in quality if a.direction == "long")
     shorts = sum(1 for a in quality if a.direction == "short")
 
-    lines = [f"━━━ {cat_prefix}V2 扫描 {time_str} ━━━",
+    lines = [f"━━━ {cat_prefix}V2 扫描 {time_str} {_current_session()} ━━━",
              f"{symbol_count}币 | {total_alerts}信号 | 推送{len(merged_list)}条 | 多{longs}/空{shorts}"]
 
     if merged_list:
@@ -1111,6 +1138,12 @@ async def async_main():
         try:
             await _refresh_cache_if_stale()
             alerts, all_ind, rs_scores_all = do_scan(symbols, cache, config)
+
+            # ── RS 加速度 ──
+            for a in alerts:
+                rs5 = (a.details.get("rs_scores") or {}).get("5m", {}).get("score", 0)
+                if rs5:
+                    a.details["rs_delta"] = signal_pool.get_rs_delta(a.symbol, rs5)
 
             apply_mtf_boost(alerts)
 

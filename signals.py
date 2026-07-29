@@ -170,13 +170,18 @@ def _check_retest(state: SignalState) -> dict | None:
 
 def _check_rsi_extreme(state: SignalState) -> dict | None:
     rsi = state.ind.get("rsi")
-    if not rsi:
+    body_dir = state.ind.get("body_dir")
+    if not rsi or not body_dir:
         return None
     if rsi <= state.params.get("oversold", 25):
+        if body_dir != "bullish":
+            return None
         sev = "critical" if rsi <= 20 else "high"
         return {"direction": "long", "severity": sev, "confidence": 0.85,
                 "evidence": f"RSI超卖{rsi:.0f}", "rsi": rsi}
     if rsi >= state.params.get("overbot", 75):
+        if body_dir != "bearish":
+            return None
         sev = "critical" if rsi >= 80 else "high"
         return {"direction": "short", "severity": sev, "confidence": 0.85,
                 "evidence": f"RSI超买{rsi:.0f}", "rsi": rsi}
@@ -187,11 +192,13 @@ def _check_volume_spike(state: SignalState) -> dict | None:
     vr = state.ind.get("volume_ratio")
     if not vr or vr < state.params.get("threshold", 3.0):
         return None
-    chg = abs(state.ind.get("roc") or 0)
+    roc = state.ind.get("roc") or 0
+    chg = abs(roc)
     if chg < state.params.get("min_price_change", 0.5):
         return None
+    direction = "long" if roc > 0 else "short"
     sev = "critical" if vr >= 5 else "high" if vr >= 3 else "medium"
-    return {"direction": state.direction, "severity": sev,
+    return {"direction": direction, "severity": sev,
             "confidence": min(0.6 + (vr - 2) * 0.12, 0.9),
             "evidence": f"放量突破 量{vr:.1f}x 涨跌{chg:.1f}%",
             "volume_ratio": vr}
