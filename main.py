@@ -940,7 +940,6 @@ async def async_main():
 
     try:
         await okx.ws_connect(symbols, timeframes, on_kline)
-        await asyncio.sleep(10)
     except Exception as e:
         logger.error(f"WebSocket connection failed: {e}")
         return
@@ -965,8 +964,13 @@ async def async_main():
     )
     scan_count = 0
     warn_buf: dict[str, list[dict]] = {}
+    first_scan = True
 
     def _wait_next_5m():
+        nonlocal first_scan
+        if first_scan:
+            first_scan = False
+            return 2.0
         now = datetime.utcnow()
         s = (now.minute % 5) * 60 + now.second + now.microsecond / 1e6
         return max(300 - s, 0.1)
@@ -1050,9 +1054,9 @@ async def async_main():
                 if ws:
                     warn_buf[sym] = ws
 
-            # ── 30m 整点推送预警 ──
+            # ── 30m 整点推送预警 (首次扫描立即推) ──
             now = datetime.utcnow()
-            if now.minute % 30 == 0:
+            if now.minute % 30 == 0 or scan_count == 1:
                 w_report = format_warning_report(warn_buf, now)
                 if w_report:
                     feishu.send(w_report)
