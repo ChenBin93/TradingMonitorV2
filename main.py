@@ -87,7 +87,6 @@ class Alert:
         tags = {
             "breakout": "突破", "fakeout": "假破", "retest": "回踩",
             "rsi_extreme": "RSI", "volume_spike": "VOL",
-            "rs_strength": "RS+", "rs_weakness": "RS-",
             "trend_pullback": "回调",
         }
         return tags.get(self.signal_type, self.signal_type[:4])
@@ -97,7 +96,6 @@ class Alert:
         names = {
             "breakout": "防线突破", "fakeout": "假突破反转", "retest": "回踩确认",
             "rsi_extreme": "RSI极值", "volume_spike": "放量异动",
-            "rs_strength": "RS强势", "rs_weakness": "RS弱势",
             "trend_pullback": "趋势回调",
         }
         return names.get(self.signal_type, self.signal_type)
@@ -137,12 +135,6 @@ class AlertFilter:
         elif a.signal_type == "volume_spike":
             vr = d.get("volume_ratio", 1)
             if vr >= 5: conf += 0.10
-        elif a.signal_type == "rs_strength":
-            rs_5m = d.get("rs_5m_score", 0)
-            if rs_5m >= 60: conf += 0.10
-        elif a.signal_type == "rs_weakness":
-            rs_5m = d.get("rs_5m_score", 0)
-            if rs_5m <= -60: conf += 0.10
 
         return min(conf, 1.0)
 
@@ -196,10 +188,6 @@ def rank_symbols(alerts: list[Alert], all_ind: dict[str, dict[str, dict]]) -> li
         if a.signal_type == "volume_spike":
             vr = a.details.get("volume_ratio", 1)
             s["volume"] = max(s["volume"], min(vr / 3, 1))
-
-        if a.signal_type in ("rs_strength", "rs_weakness"):
-            rs_5m = a.details.get("rs_5m_score", 0)
-            s["momentum"] = max(s["momentum"], min(abs(rs_5m) / 60, 1))
 
         tf_data = all_ind.get(a.symbol, {})
         ind_1h = tf_data.get("1h", {})
@@ -267,8 +255,7 @@ def _is_us_market_hours() -> bool:
 
 VALIDATION_WINDOWS: dict[str, int] = {
     "trend_pullback": 90, "rsi_extreme": 180, "retest": 60,
-    "rs_strength": 60, "rs_weakness": 60, "breakout": 30,
-    "fakeout": 30, "volume_spike": 20,
+    "breakout": 30, "fakeout": 30, "volume_spike": 20,
 }
 
 DEFAULT_TTL = 30
@@ -933,19 +920,18 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         alert.meta["rs"] = " ".join(parts) if parts else ""
 
         # 每周期独立增强: 方向与信号匹配的 TF 越多, 置信度越高
-        if alert.signal_type not in ("rs_strength", "rs_weakness"):
-            agree_count = 0
-            for s in marks:
-                if (alert.direction == "long" and s > 0) or (alert.direction == "short" and s < 0):
-                    agree_count += 1
-            if agree_count >= 3:
-                alert.confidence = min(alert.confidence * 1.15, 1.0)
-                check.append("✓RS三重")
-            elif agree_count >= 2:
-                alert.confidence = min(alert.confidence * 1.10, 1.0)
-                check.append("✓RS双周期")
-            elif agree_count >= 1:
-                alert.confidence = min(alert.confidence * 1.05, 1.0)
+        agree_count = 0
+        for s in marks:
+            if (alert.direction == "long" and s > 0) or (alert.direction == "short" and s < 0):
+                agree_count += 1
+        if agree_count >= 3:
+            alert.confidence = min(alert.confidence * 1.15, 1.0)
+            check.append("✓RS三重")
+        elif agree_count >= 2:
+            alert.confidence = min(alert.confidence * 1.10, 1.0)
+            check.append("✓RS双周期")
+        elif agree_count >= 1:
+            alert.confidence = min(alert.confidence * 1.05, 1.0)
 
     # ── 量能耗尽 ──
     body_pct_5m = ind_5m.get("body_pct", 1)

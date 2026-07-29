@@ -321,8 +321,6 @@ SIGNALS: list[SignalDef] = [
     SignalDef("retest",          "回踩确认",   _check_retest,          {},                    "回踩", "any"),
     SignalDef("rsi_extreme",     "RSI极值",    _check_rsi_extreme,     {"oversold": 25, "overbot": 75}, "RSI", "range"),
     SignalDef("volume_spike",    "放量异动",   _check_volume_spike,    {"threshold": 3.0, "min_price_change": 0.5}, "VOL", "any"),
-    SignalDef("rs_strength",     "RS强势",     _check_rs_strength,     {"score_threshold": 30}, "RS", "any"),
-    SignalDef("rs_weakness",     "RS弱势",     _check_rs_weakness,     {"score_threshold": 30}, "RS", "any"),
     SignalDef("trend_pullback",  "趋势回调",   _check_trend_pullback,  {},                    "回调", "trend"),
 ]
 
