@@ -111,6 +111,38 @@ class OKXClient:
                 result[s] = 0
         return result
 
+    def fetch_funding_rate(self, symbol: str) -> dict | None:
+        import requests
+        inst_id = symbol.replace("/", "-").replace(":USDT", "-SWAP")
+        try:
+            resp = requests.get(
+                "https://www.okx.com/api/v5/public/funding-rate",
+                params={"instId": inst_id}, timeout=10)
+            data = resp.json()
+            if data.get("code") == "0" and data.get("data"):
+                d = data["data"][0]
+                return {
+                    "funding_rate": float(d.get("fundingRate", 0)),
+                    "next_funding_time": d.get("nextFundingTime", ""),
+                }
+        except Exception:
+            pass
+        return None
+
+    def fetch_oi(self, symbol: str) -> float | None:
+        import requests
+        inst_id = symbol.replace("/", "-").replace(":USDT", "-SWAP")
+        try:
+            resp = requests.get(
+                "https://www.okx.com/api/v5/public/open-interest",
+                params={"instId": inst_id}, timeout=10)
+            data = resp.json()
+            if data.get("code") == "0" and data.get("data"):
+                return float(data["data"][0].get("oi", 0))
+        except Exception:
+            pass
+        return None
+
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
         import requests
         inst_id = symbol.replace("/", "-").replace(":USDT", "-SWAP")

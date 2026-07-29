@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 import yaml
 from loguru import logger
 
@@ -969,6 +970,37 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             else:
                 alert.meta["tp_full"] = f"{sf.format(tp)}(70%)"
 
+    # ── 拥挤度 ──
+    funding = alert.details.get("btc_funding")
+    if funding is not None:
+        if funding > 0.05 and alert.direction == "long":
+            check.append("⚠拥挤")
+            alert.confidence = min(alert.confidence * 0.85, 1.0)
+        elif funding < -0.03 and alert.direction == "short":
+            check.append("⚠拥挤")
+            alert.confidence = min(alert.confidence * 0.85, 1.0)
+        elif funding < -0.03 and alert.direction == "long":
+            check.append("✓反向")
+            alert.confidence = min(alert.confidence * 1.10, 1.0)
+        elif funding > 0.05 and alert.direction == "short":
+            check.append("✓反向")
+            alert.confidence = min(alert.confidence * 1.10, 1.0)
+
+    # ── RS 分布 ──
+    dispersion = alert.details.get("rs_dispersion", 0)
+    if dispersion > 15:
+        check.append("✓分化")
+    elif 0 < dispersion < 8:
+        alert.confidence = min(alert.confidence * 0.92, 1.0)
+
+    # ── 波动率结构: 5m ATR(14) / 1H ATR(14) ──
+    atr_5m_val = (tf_ind.get("5m") or {}).get("atr", 0) or 1
+    atr_1h_val = (ind_1h or {}).get("atr", 0) or 1
+    if atr_1h_val > 0 and atr_5m_val > 0:
+        vol_ratio = atr_5m_val / atr_1h_val
+        if vol_ratio > 0.6:
+            check.append("⚡波动加速")
+
     alert.checklist = check
 
 
@@ -1125,6 +1157,24 @@ async def async_main():
             await _refresh_cache_if_stale()
             alerts, all_ind, rs_scores_all = do_scan(symbols, cache, config)
 
+            # ── 拥挤度: BTC 资金费率 ──
+            btc_funding = None
+            try:
+                fr = okx.fetch_funding_rate("BTC/USDT:USDT")
+                if fr:
+                    btc_funding = fr["funding_rate"] * 100
+            except Exception:
+                pass
+
+            # ── RS 分布: 标准差判断资金分化 ──
+            rs_5m_vals = [rs_scores_all[s].get("5m", {}).get("score", 0) for s in rs_scores_all if s in rs_scores_all]
+            rs_dispersion = round(float(np.std(rs_5m_vals)), 1) if len(rs_5m_vals) > 5 else 0.0
+
+            # 注入到 alert.details
+            for a in alerts:
+                a.details["btc_funding"] = btc_funding
+                a.details["rs_dispersion"] = rs_dispersion
+
             # ── RS 加速度 ──
             for a in alerts:
                 rs5 = (a.details.get("rs_scores") or {}).get("5m", {}).get("score", 0)
@@ -1150,6 +1200,11 @@ async def async_main():
                     bias_icon = "🔺" if ms["bias"] == "long" else "🔻"
                     bias_text = "做多" if ms["bias"] == "long" else "做空"
                     ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} ━━━\n{ms['desc']}\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
+                    if btc_funding is not None:
+                        crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
+                        ms_line += f" | 费率:{btc_funding:+.3f}%{crowd}"
+                    if rs_dispersion > 5:
+                        ms_line += f" | RS分化:σ={rs_dispersion:.0f}"
                     feishu.send(ms_line)
 
                 buckets: dict[str, list[Alert]] = {}
