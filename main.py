@@ -240,6 +240,52 @@ def _is_us_market_hours() -> bool:
 
 
 # =============================================================================
+# 信号池 — 30min 持久化, 解决信号闪烁
+# =============================================================================
+
+class SignalPool:
+    def __init__(self, ttl_minutes: int = 30):
+        self.ttl = ttl_minutes * 60
+        self._pool: dict[str, Alert] = {}
+        self._fresh: set[str] = set()
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def _key(a: Alert) -> str:
+        return f"{a.symbol}|{a.signal_type}|{a.direction}"
+
+    def update(self, alerts: list[Alert]):
+        now = datetime.now()
+        with self._lock:
+            self._fresh = set()
+            for a in alerts:
+                k = self._key(a)
+                a.details["persist_since"] = now
+                a.details["is_fresh"] = True
+                self._pool[k] = a
+                self._fresh.add(k)
+
+            expired = []
+            for k, a in self._pool.items():
+                age = (now - a.details.get("persist_since", a.timestamp)).total_seconds()
+                if age > self.ttl:
+                    expired.append(k)
+            for k in expired:
+                del self._pool[k]
+
+    def get_active(self) -> list[Alert]:
+        with self._lock:
+            result = []
+            for k, a in self._pool.items():
+                a.details["is_fresh"] = k in self._fresh
+                result.append(a)
+            return sorted(result, key=lambda x: x.confidence, reverse=True)
+
+    def is_fresh(self, a: Alert) -> bool:
+        return self._key(a) in self._fresh
+
+
+# =============================================================================
 # 飞书格式化
 # =============================================================================
 
@@ -248,14 +294,21 @@ def fmt_short_alert(a: Alert) -> str:
     dir_map = {"long": "多", "short": "空"}
     d = dir_map.get(a.direction, "")
     m = a.meta
-    severity_icon = "🔴" if a.severity == "critical" else "🟠"
+
+    is_new = a.details.get("is_fresh", True)
+    icon = "🔴" if is_new else "🟡"
+
+    stars = "⭐⭐⭐" if a.confidence >= 0.80 else "⭐⭐" if a.confidence >= 0.70 else "⭐"
+
     rr = m.get("rr", "-")
     s = m.get("support", "-")
     r = m.get("resistance", "-")
     checks = " ".join([c for c in a.checklist if c.startswith("✓") or c.startswith("⚠")][:4])
     rs = m.get("rs", "")
     rs_str = f" RS:{rs}" if rs else ""
-    line = f"{severity_icon} {sym}[{a.timeframe}] {d} {a.name} RR:{rr}{rs_str}"
+    persist = "" if is_new else " 持续中"
+
+    line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{rs_str}"
     line2 = f"   S:{s} R:{r} | {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
@@ -314,23 +367,24 @@ def format_consolidated_report(
 
     quality = []
     for a in filtered:
-        rr_str = a.meta.get("rr", "0:1").split(":")[0]
-        try:
-            rr_val = float(rr_str)
-        except ValueError:
-            rr_val = 0
-        if rr_val < 1.5:
-            continue
-
-        has_dir_fail = any(c == "✗方向" for c in a.checklist)
-        if has_dir_fail:
-            continue
-        has_pos_fail = any(c == "✗位置" for c in a.checklist)
-        if has_pos_fail:
-            continue
-        has_stale = any(c == "⚠数据陈旧" for c in a.checklist)
-        if has_stale:
-            continue
+        is_fresh = a.details.get("is_fresh", True)
+        if is_fresh:
+            rr_str = a.meta.get("rr", "0:1").split(":")[0]
+            try:
+                rr_val = float(rr_str)
+            except ValueError:
+                rr_val = 0
+            if rr_val < 1.5:
+                continue
+            has_dir_fail = any(c == "✗方向" for c in a.checklist)
+            if has_dir_fail:
+                continue
+            has_pos_fail = any(c == "✗位置" for c in a.checklist)
+            if has_pos_fail:
+                continue
+            has_stale = any(c == "⚠数据陈旧" for c in a.checklist)
+            if has_stale:
+                continue
         if _is_us_stock(a.symbol) and not _is_us_market_hours():
             continue
 
@@ -965,6 +1019,7 @@ async def async_main():
     scan_count = 0
     warn_buf: dict[str, list[dict]] = {}
     first_scan = True
+    signal_pool = SignalPool(ttl_minutes=30)
 
     def _wait_next_5m():
         nonlocal first_scan
@@ -1013,9 +1068,12 @@ async def async_main():
 
             filtered = alert_filter.filter(alerts)
 
-            ranks = rank_symbols(alerts, all_ind) if filtered else []
+            signal_pool.update(filtered)
+            active = signal_pool.get_active()
 
-            if filtered:
+            ranks = rank_symbols(alerts, all_ind) if active else []
+
+            if active:
                 ms = compute_market_state(all_ind)
                 if ms["bias"] != "neutral":
                     bias_icon = "🔺" if ms["bias"] == "long" else "🔻"
@@ -1024,7 +1082,7 @@ async def async_main():
                     feishu.send(ms_line)
 
                 buckets: dict[str, list[Alert]] = {}
-                for a in filtered:
+                for a in active:
                     cat = _symbol_category(a.symbol)
                     buckets.setdefault(cat, []).append(a)
 
@@ -1035,7 +1093,9 @@ async def async_main():
                         cat_alerts, cat_ranks, len(alerts), len(symbols), scan_start,
                         category_label=cat_label)
                     feishu.send(report)
-                logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(ranks)} ranked ({'/'.join(f'{k}:{len(v)}' for k,v in buckets.items())})")
+                new_count = sum(1 for a in active if a.details.get("is_fresh"))
+                persist_count = len(active) - new_count
+                logger.info(f"Scan #{scan_count}: {len(active)} alerts ({new_count} new + {persist_count} persisted), {len(ranks)} ranked ({'/'.join(f'{k}:{len(v)}' for k,v in buckets.items())})")
             else:
                 logger.info(f"Scan #{scan_count}: 0 push alerts (raw {len(alerts)} signals scanned)")
 
