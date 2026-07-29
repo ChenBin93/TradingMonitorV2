@@ -30,7 +30,8 @@ class SignalDef:
 
 def _sr_df(state: SignalState):
     """返回 S/R 计算用的 DataFrame: 1H 优先（大结构），否则用当前 TF"""
-    return (state.ind_1h or {}).get("df") or state.ind.get("df")
+    df = (state.ind_1h or {}).get("df")
+    return df if df is not None and len(df) > 0 else state.ind.get("df")
 
 
 # ═══════════════════════════════════════════════════════════════════════
