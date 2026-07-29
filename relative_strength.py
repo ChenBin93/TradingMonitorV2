@@ -6,60 +6,73 @@ from dataclasses import dataclass
 class RSResult:
     symbol: str
     rs_score: float       # -100 ~ +100, ATR归一化后的连续相对强弱评分
-    rs_momentum: float    # 原始超额收益率 (%)
-    rs_zscore: float      # ATR归一化后的 z-score (超额/波动)
+    rs_zscore: float      # 多窗口加权平均 z-score
     rs_rank: float        # 全币种百分位排名 (0~1)
     rs_level: str         # strong / mild_strong / neutral / mild_weak / weak
 
 
 def compute_rs(
     sym_close_map: dict[str, float | None],
-    sym_prev_close_map: dict[str, float | None],
+    sym_prev_maps: list[dict[str, float | None]],
     sym_atr_map: dict[str, float | None],
     btc_close: float | None,
-    btc_prev_close: float | None,
+    btc_prev_list: list[float | None],
     btc_atr: float | None,
-    momentum_period: int = 5,
+    lookbacks: list[int] | None = None,
 ) -> dict[str, RSResult]:
-    if not btc_close or not btc_prev_close or btc_prev_close == 0:
+    if not btc_close or btc_atr is None or btc_atr <= 0:
         return {}
 
-    btc_roc = (btc_close - btc_prev_close) / btc_prev_close * 100
-    btc_atr_pct = (btc_atr / btc_close * 100) if btc_atr and btc_atr > 0 and btc_close > 0 else 1.0
+    if lookbacks is None:
+        lookbacks = [5]
+
+    # 反比权重
+    raw_weights = np.array([1.0 / w for w in lookbacks])
+    weights = raw_weights / raw_weights.sum()
+
+    btc_atr_pct = btc_atr / btc_close * 100 if btc_close > 0 else 1.0
+    btc_roc = (btc_close - btc_prev_list[0]) / btc_prev_list[0] * 100 if btc_prev_list[0] and btc_prev_list[0] > 0 else 0
     btc_z = btc_roc / max(btc_atr_pct, 0.01)
 
     results = {}
-    z_diffs = {}
+    z_diffs_all = {}
 
     for sym, close in sym_close_map.items():
-        prev = sym_prev_close_map.get(sym)
         atr = sym_atr_map.get(sym)
-        if not close or not prev or prev == 0:
+        if not close or not atr or atr <= 0:
             continue
 
-        sym_roc = (close - prev) / prev * 100
-        rs_momentum = sym_roc - btc_roc
+        sym_atr_pct = atr / close * 100 if close > 0 else 1.0
+        sym_zs = []
+        for i, w in enumerate(lookbacks):
+            prev_map = sym_prev_maps[i] if i < len(sym_prev_maps) else {}
+            prev = prev_map.get(sym)
+            if prev and prev > 0:
+                sym_roc = (close - prev) / prev * 100
+                sym_z = sym_roc / max(sym_atr_pct, 0.01)
+                sym_zs.append(sym_z)
 
-        sym_atr_pct = (atr / close * 100) if atr and atr > 0 and close > 0 else 1.0
-        sym_z = sym_roc / max(sym_atr_pct, 0.01)
-        z_diff = sym_z - btc_z
+        if not sym_zs:
+            continue
 
-        z_diffs[sym] = z_diff
+        sym_z_avg = sum(sym_zs[j] * weights[j] for j in range(min(len(sym_zs), len(weights))))
+        z_diff = sym_z_avg - btc_z
+        z_diffs_all[sym] = z_diff
+
         results[sym] = RSResult(
             symbol=sym,
             rs_score=0.0,
-            rs_momentum=round(rs_momentum, 4),
             rs_zscore=round(z_diff, 4),
             rs_rank=0.5,
             rs_level="neutral",
         )
 
-    if len(z_diffs) < 2:
+    if len(z_diffs_all) < 2:
         return results
 
-    z_vals = np.array(list(z_diffs.values()))
+    z_vals = np.array(list(z_diffs_all.values()))
 
-    for sym, z_diff in z_diffs.items():
+    for sym, z_diff in z_diffs_all.items():
         rank = (z_vals < z_diff).sum() / max(len(z_vals) - 1, 1)
         rank_dev = (rank - 0.5) * 2
         norm_z = np.clip(z_diff / 3.0, -1, 1)
@@ -77,7 +90,6 @@ def compute_rs(
             level = "neutral"
 
         results[sym].rs_score = rs_score
-        results[sym].rs_zscore = round(z_diff, 4)
         results[sym].rs_rank = round(float(rank), 4)
         results[sym].rs_level = level
 

@@ -243,10 +243,23 @@ def _is_us_market_hours() -> bool:
 # 信号池 — 30min 持久化, 解决信号闪烁
 # =============================================================================
 
+# ═══════════════════════════════════════════════════════════════════════
+# 信号池 — per-signal TTL + 时效指示器
+# ═══════════════════════════════════════════════════════════════════════
+
+VALIDATION_WINDOWS: dict[str, int] = {
+    "trend_pullback": 90, "rsi_extreme": 180, "retest": 60,
+    "rs_strength": 60, "rs_weakness": 60, "breakout": 30,
+    "fakeout": 30, "volume_spike": 20,
+}
+
+DEFAULT_TTL = 30
+
+
 class SignalPool:
-    def __init__(self, ttl_minutes: int = 30):
-        self.ttl = ttl_minutes * 60
+    def __init__(self):
         self._pool: dict[str, Alert] = {}
+        self._first_seen: dict[str, datetime] = {}
         self._fresh: set[str] = set()
         self._lock = threading.RLock()
 
@@ -254,12 +267,17 @@ class SignalPool:
     def _key(a: Alert) -> str:
         return f"{a.symbol}|{a.signal_type}|{a.direction}"
 
+    def _ttl_seconds(self, signal_type: str) -> int:
+        return VALIDATION_WINDOWS.get(signal_type, DEFAULT_TTL) * 60
+
     def update(self, alerts: list[Alert]):
         now = datetime.now()
         with self._lock:
             self._fresh = set()
             for a in alerts:
                 k = self._key(a)
+                if k not in self._first_seen:
+                    self._first_seen[k] = now
                 a.details["persist_since"] = now
                 a.details["is_fresh"] = True
                 self._pool[k] = a
@@ -267,17 +285,32 @@ class SignalPool:
 
             expired = []
             for k, a in self._pool.items():
-                age = (now - a.details.get("persist_since", a.timestamp)).total_seconds()
-                if age > self.ttl:
+                ttl = self._ttl_seconds(a.signal_type)
+                age = (now - self._first_seen.get(k, a.details.get("persist_since", a.timestamp))).total_seconds()
+                if age > ttl:
                     expired.append(k)
             for k in expired:
                 del self._pool[k]
+                self._first_seen.pop(k, None)
 
     def get_active(self) -> list[Alert]:
+        now = datetime.now()
         with self._lock:
             result = []
             for k, a in self._pool.items():
                 a.details["is_fresh"] = k in self._fresh
+                first = self._first_seen.get(k, a.timestamp)
+                elapsed = (now - first).total_seconds() / 60.0
+                window = VALIDATION_WINDOWS.get(a.signal_type, DEFAULT_TTL)
+                a.details["elapsed_min"] = int(elapsed)
+                a.details["window_min"] = window
+                pct = elapsed / window * 100 if window > 0 else 100
+                if pct <= 50:
+                    a.details["age_icon"] = "🟢"
+                elif pct <= 100:
+                    a.details["age_icon"] = "🟡"
+                else:
+                    a.details["age_icon"] = "⏰"
                 result.append(a)
             return sorted(result, key=lambda x: x.confidence, reverse=True)
 
@@ -300,6 +333,11 @@ def fmt_short_alert(a: Alert) -> str:
 
     stars = "⭐⭐⭐" if a.confidence >= 0.80 else "⭐⭐" if a.confidence >= 0.70 else "⭐"
 
+    elapsed = a.details.get("elapsed_min", 0)
+    window = a.details.get("window_min", 30)
+    age_icon = a.details.get("age_icon", "🟢") if not is_new else ""
+    timer = f" {age_icon}{elapsed}/{window}m" if elapsed > 0 and not is_new else ""
+
     rr = m.get("rr", "-")
     s = m.get("support", "-")
     r = m.get("resistance", "-")
@@ -308,7 +346,7 @@ def fmt_short_alert(a: Alert) -> str:
     rs_str = f" RS:{rs}" if rs else ""
     persist = "" if is_new else " 持续中"
 
-    line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{rs_str}"
+    line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{timer}{rs_str}"
     line2 = f"   S:{s} R:{r} | {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
@@ -456,11 +494,11 @@ def do_scan(
     all_ind: dict[str, dict[str, dict]] = {}
 
     rs_cfg = config.get("rs", {})
-    momentum_period = rs_cfg.get("momentum_period", 5)
+    windows_cfg = rs_cfg.get("momentum_windows", {"5m": [5], "1h": [5], "4h": [5]})
 
     # ── 第一遍：收集所有 TF 的指标 + RS 数据 ──
     tf_close: dict[str, dict[str, float | None]] = {tf: {} for tf in timeframes}
-    tf_prev: dict[str, dict[str, float | None]] = {tf: {} for tf in timeframes}
+    tf_prev_maps: dict[str, list[dict[str, float | None]]] = {tf: [] for tf in timeframes}
     tf_atr: dict[str, dict[str, float | None]] = {tf: {} for tf in timeframes}
 
     for sym in symbols:
@@ -480,22 +518,35 @@ def do_scan(
 
         for tf in timeframes:
             ind = tf_ind.get(tf, {})
-            if ind:
-                tf_close[tf][sym] = ind.get("close")
-                tf_atr[tf][sym] = ind.get("atr_rs")
-                df = ind.get("df")
-                if df is not None and len(df) > momentum_period:
-                    tf_prev[tf][sym] = df["close"].iloc[-momentum_period - 1]
+            if not ind:
+                continue
+            tf_close[tf][sym] = ind.get("close")
+            tf_atr[tf][sym] = ind.get("atr_rs")
+            df = ind.get("df")
+            if df is None:
+                continue
+            lookbacks = windows_cfg.get(tf, [5])
+            if len(tf_prev_maps[tf]) == 0:
+                tf_prev_maps[tf] = [{} for _ in lookbacks]
+            for i, w in enumerate(lookbacks):
+                if len(df) > w:
+                    tf_prev_maps[tf][i][sym] = df["close"].iloc[-w - 1]
 
     # ── 多周期 RS 计算 ──
     btc_symbol = "BTC/USDT:USDT"
     rs_by_tf: dict[str, dict[str, object]] = {}
     for tf in timeframes:
+        lookbacks = windows_cfg.get(tf, [5])
         btc_close = tf_close[tf].get(btc_symbol)
-        btc_prev = tf_prev[tf].get(btc_symbol)
         btc_atr = tf_atr[tf].get(btc_symbol)
-        rs_by_tf[tf] = compute_rs(tf_close[tf], tf_prev[tf], tf_atr[tf],
-                                  btc_close, btc_prev, btc_atr, momentum_period)
+        btc_prev_list = []
+        for i in range(len(lookbacks)):
+            if i < len(tf_prev_maps[tf]):
+                btc_prev_list.append(tf_prev_maps[tf][i].get(btc_symbol))
+            else:
+                btc_prev_list.append(None)
+        rs_by_tf[tf] = compute_rs(tf_close[tf], tf_prev_maps[tf], tf_atr[tf],
+                                  btc_close, btc_prev_list, btc_atr, lookbacks)
 
     # ── 汇总每个 symbol 的多周期 RS ──
     rs_scores_all: dict[str, dict[str, dict]] = {}
@@ -505,7 +556,7 @@ def do_scan(
             r = rs_by_tf[tf].get(sym)
             if r:
                 rs_scores_all[sym][tf] = {"score": r.rs_score, "level": r.rs_level,
-                                           "zscore": r.rs_zscore, "momentum": r.rs_momentum}
+                                            "zscore": r.rs_zscore}
 
     # ── 第二遍：逐 TF 检查信号（1H/4H 仅做方向锚）──
     for sym, tf_ind in all_ind.items():
@@ -1020,7 +1071,7 @@ async def async_main():
     scan_count = 0
     warn_buf: dict[str, list[dict]] = {}
     first_scan = True
-    signal_pool = SignalPool(ttl_minutes=30)
+    signal_pool = SignalPool()
 
     def _wait_next_5m():
         nonlocal first_scan
