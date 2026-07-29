@@ -1268,6 +1268,8 @@ async def async_main():
                         cat_alerts, cat_ranks, len(alerts), len(symbols), scan_start,
                         category_label=cat_label)
                     feishu.send(report)
+                new_count = sum(1 for a in active if a.details.get("is_fresh"))
+                persist_count = len(active) - new_count
                 logger.info(f"Scan #{scan_count}: {len(active)} alerts ({new_count} new + {persist_count} persisted), {len(ranks)} ranked ({'/'.join(f'{k}:{len(v)}' for k,v in buckets.items())})")
 
                 # ── 酝酿报告 ──
