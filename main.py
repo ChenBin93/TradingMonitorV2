@@ -251,15 +251,21 @@ def _is_us_market_hours() -> bool:
 # =============================================================================
 
 # ═══════════════════════════════════════════════════════════════════════
-# 信号池 — per-signal TTL + 时效指示器
+# 信号池 — 入场窗口 + 持仓时限
 # ═══════════════════════════════════════════════════════════════════════
 
-VALIDATION_WINDOWS: dict[str, int] = {
-    "trend_pullback": 90, "rsi_extreme": 180, "retest": 60,
-    "breakout": 30, "fakeout": 30, "volume_spike": 20,
+ENTRY_WINDOWS: dict[str, int] = {
+    "volume_spike": 15, "breakout": 30, "fakeout": 30,
+    "retest": 60, "trend_pullback": 60, "rsi_extreme": 90,
 }
 
-DEFAULT_TTL = 30
+POSITION_LIMITS: dict[str, int] = {
+    "volume_spike": 60, "fakeout": 120, "breakout": 180,
+    "retest": 180, "trend_pullback": 360, "rsi_extreme": 480,
+}
+
+DEFAULT_ENTRY = 30
+DEFAULT_LIMIT = 180
 
 
 class SignalPool:
@@ -273,9 +279,6 @@ class SignalPool:
     @staticmethod
     def _key(a: Alert) -> str:
         return f"{a.symbol}|{a.signal_type}|{a.direction}"
-
-    def _ttl_seconds(self, signal_type: str) -> int:
-        return VALIDATION_WINDOWS.get(signal_type, DEFAULT_TTL) * 60
 
     def update(self, alerts: list[Alert]):
         now = datetime.now()
@@ -292,9 +295,9 @@ class SignalPool:
 
             expired = []
             for k, a in self._pool.items():
-                ttl = self._ttl_seconds(a.signal_type)
+                ttl_sec = ENTRY_WINDOWS.get(a.signal_type, DEFAULT_ENTRY) * 60
                 age = (now - self._first_seen.get(k, a.details.get("persist_since", a.timestamp))).total_seconds()
-                if age > ttl:
+                if age > ttl_sec:
                     expired.append(k)
             for k in expired:
                 del self._pool[k]
@@ -308,16 +311,17 @@ class SignalPool:
                 a.details["is_fresh"] = k in self._fresh
                 first = self._first_seen.get(k, a.timestamp)
                 elapsed = (now - first).total_seconds() / 60.0
-                window = VALIDATION_WINDOWS.get(a.signal_type, DEFAULT_TTL)
+                entry_win = ENTRY_WINDOWS.get(a.signal_type, DEFAULT_ENTRY)
+                pct = elapsed / entry_win * 100 if entry_win > 0 else 100
                 a.details["elapsed_min"] = int(elapsed)
-                a.details["window_min"] = window
-                pct = elapsed / window * 100 if window > 0 else 100
-                if pct <= 50:
-                    a.details["age_icon"] = "🟢"
-                elif pct <= 100:
-                    a.details["age_icon"] = "🟡"
+                a.details["entry_win_min"] = entry_win
+                a.details["position_limit_min"] = POSITION_LIMITS.get(a.signal_type, DEFAULT_LIMIT)
+                if pct <= 40:
+                    a.details["entry_status"] = "🟢"
+                elif pct <= 80:
+                    a.details["entry_status"] = "🟡"
                 else:
-                    a.details["age_icon"] = "⏰"
+                    a.details["entry_status"] = "🔴"
                 result.append(a)
             return sorted(result, key=lambda x: x.confidence, reverse=True)
 
@@ -347,9 +351,12 @@ def fmt_short_alert(a: Alert) -> str:
     stars = "⭐⭐⭐" if a.confidence >= 0.80 else "⭐⭐" if a.confidence >= 0.70 else "⭐"
 
     elapsed = a.details.get("elapsed_min", 0)
-    window = a.details.get("window_min", 30)
-    age_icon = a.details.get("age_icon", "🟢") if not is_new else ""
-    timer = f" {age_icon}{elapsed}/{window}m" if elapsed > 0 and not is_new else ""
+    entry_win = a.details.get("entry_win_min", 30)
+    pos_limit = a.details.get("position_limit_min", 180)
+    entry_status = a.details.get("entry_status", "🟢") if elapsed > 0 else ""
+
+    entry_timer = f" 🚪{entry_status}{elapsed}/{entry_win}m" if elapsed > 0 else ""
+    pos_hint = f" ⏱{pos_limit}m" if pos_limit > 0 else ""
 
     rr = m.get("rr", "-")
     s = m.get("support", "-")
@@ -361,7 +368,7 @@ def fmt_short_alert(a: Alert) -> str:
     rs_str = f" RS:{rs}{rs_d_str}" if rs else ""
     persist = "" if is_new else " 持续中"
 
-    line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{timer}{rs_str}"
+    line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{entry_timer}{pos_hint}{rs_str}"
     line2 = f"   S:{s} R:{r} | {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
