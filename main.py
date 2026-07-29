@@ -607,6 +607,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     ind_base = ind_1h or tf_ind.get("5m", {})
     current_price = ind_base.get("close")
     atr_1h = ind_base.get("atr") or 1
+    atr_5m = (tf_ind.get("5m") or {}).get("atr") or 1
 
     sr_info = {}
     df_1h = (ind_1h or {}).get("df")
@@ -668,17 +669,17 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     sl = tp = 0
 
     if alert.direction == "long":
-        sl = sr_info["support"].price - atr_1h * 0.3 if "support" in sr_info else entry_price - atr_1h * 1.5
+        sl = sr_info["support"].price - atr_5m * 0.3 if "support" in sr_info else entry_price - atr_5m * 1.5
         tp = sr_info["resistance"].price if "resistance" in sr_info else entry_price + atr_1h * 2.5
         if tp <= sl or tp <= entry_price or (tp - entry_price) < (entry_price - sl) * 1.5:
             tp = entry_price + atr_1h * 2.5
     elif alert.direction == "short":
-        sl = sr_info["resistance"].price + atr_1h * 0.3 if "resistance" in sr_info else entry_price + atr_1h * 1.5
+        sl = sr_info["resistance"].price + atr_5m * 0.3 if "resistance" in sr_info else entry_price + atr_5m * 1.5
         tp = sr_info["support"].price if "support" in sr_info else entry_price - atr_1h * 2.5
         if tp >= sl or tp >= entry_price or (entry_price - tp) < (sl - entry_price) * 1.5:
             tp = entry_price - atr_1h * 2.5
     else:
-        sl = entry_price - atr_1h * 1.5
+        sl = entry_price - atr_5m * 1.5
         tp = entry_price + atr_1h * 1.5
 
     sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.5f}"
@@ -890,14 +891,14 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     if entry_price > 0 and atr_1h > 0 and tp != 0:
         sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.5f}"
         if alert.direction == "long" and tp > entry_price:
-            tp1 = entry_price + atr_1h * 0.8
+            tp1 = entry_price + atr_5m * 0.8
             if tp1 < tp:
                 alert.meta["tp1"] = f"{sf.format(tp1)}(40%)"
                 alert.meta["tp2"] = f"{sf.format(tp)}(30%)"
             else:
                 alert.meta["tp_full"] = f"{sf.format(tp)}(70%)"
         elif alert.direction == "short" and tp < entry_price:
-            tp1 = entry_price - atr_1h * 0.8
+            tp1 = entry_price - atr_5m * 0.8
             if tp1 > tp:
                 alert.meta["tp1"] = f"{sf.format(tp1)}(40%)"
                 alert.meta["tp2"] = f"{sf.format(tp)}(30%)"
