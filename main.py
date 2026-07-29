@@ -234,6 +234,30 @@ def _current_session() -> str:
     return "🌃低流动"
 
 
+def _symbol_bias(tf_ind: dict) -> str:
+    """4H+1H 宏观方向判定: long / short / neutral"""
+    ind_4h = tf_ind.get("4h", {})
+    ind_1h = tf_ind.get("1h", {})
+    ma_4h = ind_4h.get("ma_alignment", "neutral") if ind_4h else "neutral"
+    ma_1h = ind_1h.get("ma_alignment", "neutral") if ind_1h else "neutral"
+    adx_4h = ind_4h.get("adx", 0) or 0
+    adx_1h = ind_1h.get("adx", 0) or 0
+
+    if ma_4h == "bullish" and ma_1h == "bullish":
+        return "long"
+    if ma_4h == "bearish" and ma_1h == "bearish":
+        return "short"
+    if ma_4h == "bullish" and adx_4h >= 20:
+        return "long"
+    if ma_4h == "bearish" and adx_4h >= 20:
+        return "short"
+    if ma_1h == "bullish" and adx_1h >= 25:
+        return "long"
+    if ma_1h == "bearish" and adx_1h >= 25:
+        return "short"
+    return "neutral"
+
+
 def _is_us_market_hours() -> bool:
     try:
         now = datetime.now()
@@ -438,6 +462,9 @@ def format_consolidated_report(
                 continue
             has_dir_fail = any(c == "✗方向" for c in a.checklist)
             if has_dir_fail:
+                continue
+            has_trend_fail = any(c == "✗趋势" for c in a.checklist)
+            if has_trend_fail:
                 continue
             has_pos_fail = any(c == "✗位置" for c in a.checklist)
             if has_pos_fail:
@@ -675,6 +702,20 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             check.append("✗方向")
     else:
         check.append("?方向")
+
+    # ── 宏观趋势: 4H+1H 方向一致性 ──
+    bias = _symbol_bias(tf_ind)
+    alert.details["macro_bias"] = bias
+    if bias != "neutral":
+        counter = (bias == "long" and sig_dir == "short") or (bias == "short" and sig_dir == "long")
+        if counter:
+            if alert.signal_type == "fakeout":
+                check.append("✓反趋势")
+            else:
+                check.append("✗趋势")
+                alert.confidence = min(alert.confidence * 0.65, 0.60)
+        else:
+            check.append("✓趋势")
 
     # ── S/R + SL/TP/RR ──
     ind_base = ind_1h or tf_ind.get("5m", {})
