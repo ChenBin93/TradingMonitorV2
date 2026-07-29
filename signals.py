@@ -321,6 +321,103 @@ SIGNALS: list[SignalDef] = [
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 预警系统 (30m推送, 比信号更早的预备提示)
+# ═══════════════════════════════════════════════════════════════════════
+
+@dataclass
+class WarningDef:
+    id: str
+    name: str
+    check: Callable
+
+
+def _check_near_sr(state: SignalState) -> dict | None:
+    ind_1h = state.ind_1h
+    if not ind_1h:
+        return None
+    df_1h = ind_1h.get("df")
+    close = state.ind.get("close")
+    atr = state.ind.get("atr") or 1
+    if df_1h is None or len(df_1h) < 20 or not close:
+        return None
+
+    levels = find_swing_levels(df_1h, lookback=50)
+    for lvl in levels:
+        if lvl.touch_count < 2:
+            continue
+        dist = abs(close - lvl.price)
+        if dist <= atr * 2.0:
+            direction = "多" if lvl.side == "support" else "空"
+            return {
+                "type": "near_sr",
+                "evidence": f"接近{lvl.side}{lvl.price:.5g}({dist/atr:.1f}ATR)",
+                "direction": direction,
+                "sr_price": lvl.price,
+                "sr_side": lvl.side,
+            }
+    return None
+
+
+def _check_coiling(state: SignalState) -> dict | None:
+    bb_state = state.ind.get("bb_state", "")
+    comp_bars = state.ind.get("compression_bars", 0)
+    adx = state.ind.get("adx", 0) or 0
+    ts = state.ind.get("ttm_squeeze")
+    squeeze = ts.get("squeeze_bars", 0) if ts else 0
+
+    if comp_bars >= 4 or squeeze >= 5 or bb_state == "contracting":
+        return {
+            "type": "coiling",
+            "evidence": f"蓄力中 {'压{comp_bars}根' if comp_bars>=4 else ''}{' ADX={adx:.0f}' if adx>0 else ''}",
+            "comp_bars": comp_bars,
+            "adx": adx,
+        }
+    return None
+
+
+def _check_rsi_approaching(state: SignalState) -> dict | None:
+    rsi = state.ind.get("rsi")
+    if not rsi:
+        return None
+    if 30 <= rsi <= 35:
+        return {"type": "rsi_approaching", "evidence": f"RSI趋近超卖{rsi:.0f}", "rsi": rsi, "side": "oversold"}
+    if 65 <= rsi <= 70:
+        return {"type": "rsi_approaching", "evidence": f"RSI趋近超买{rsi:.0f}", "rsi": rsi, "side": "overbot"}
+    return None
+
+
+def _check_rs_moving(state: SignalState) -> dict | None:
+    rs5 = state.rs_scores.get("5m", {})
+    score = rs5.get("score", 0)
+    if 15 <= abs(score) < 30:
+        side = "强" if score > 0 else "弱"
+        return {"type": "rs_moving", "evidence": f"RS走{side}{score:+.0f}", "rs_score": score}
+    return None
+
+
+WARNINGS: list[WarningDef] = [
+    WarningDef("near_sr",        "接近防线",   _check_near_sr),
+    WarningDef("coiling",        "蓄力待发",   _check_coiling),
+    WarningDef("rsi_approaching","RSI趋近",    _check_rsi_approaching),
+    WarningDef("rs_moving",      "RS异动",     _check_rs_moving),
+]
+
+
+def check_warnings(state: SignalState) -> list[dict]:
+    results = []
+    for wdef in WARNINGS:
+        try:
+            r = wdef.check(state)
+            if r:
+                r["id"] = wdef.id
+                r["name"] = wdef.name
+                results.append(r)
+        except Exception:
+            pass
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 辅助
 # ═══════════════════════════════════════════════════════════════════════
 

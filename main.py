@@ -11,7 +11,7 @@ from loguru import logger
 
 from okx import OKXClient, KlineCache, Candle
 from indicators import compute as compute_indicators
-from signals import SIGNALS, SignalState, get_direction, get_regime, is_compressing
+from signals import SIGNALS, SignalState, get_direction, get_regime, is_compressing, check_warnings
 from notify import Feishu
 from utils import setup_logging, start_health_server
 from support_resistance import find_swing_levels, get_nearest_levels
@@ -274,6 +274,33 @@ def fmt_short_alert(a: Alert) -> str:
     return f"{line}\n{line2}{opt_line}{vp_line}{tp_line}"
 
 
+def format_warning_report(warnings: dict[str, list[dict]], scan_time: datetime) -> str | None:
+    """格式化预警消息, 无预警返回 None"""
+    if not warnings:
+        return None
+
+    time_str = scan_time.strftime("%H:%M")
+    icon_map = {
+        "near_sr": "🔵", "coiling": "⚡", "rsi_approaching": "🟠", "rs_moving": "🔵",
+    }
+
+    lines = [f"━━━ ⚡预警 {time_str} ━━━"]
+    count = 0
+    for sym, items in warnings.items():
+        sym_short = sym.replace("-USDT-SWAP", "/USDT").split(":")[0]
+        parts = []
+        for w in items:
+            icon = icon_map.get(w.get("type", ""), "")
+            parts.append(f"{icon}{w['evidence']}")
+        if parts:
+            lines.append(f"{sym_short}  {'  '.join(parts)}")
+            count += 1
+        if count >= 8:
+            break
+
+    return "\n".join(lines) if count > 0 else None
+
+
 def format_consolidated_report(
     filtered: list[Alert],
     ranks: list[SymbolRank],
@@ -369,7 +396,7 @@ def do_scan(
     symbols: list[str],
     cache: KlineCache,
     config: dict,
-) -> tuple[list[Alert], dict[str, dict[str, dict]]]:
+) -> tuple[list[Alert], dict[str, dict[str, dict]], dict]:
     timeframes = config["timeframes"]
     alerts: list[Alert] = []
     all_ind: dict[str, dict[str, dict]] = {}
@@ -473,7 +500,7 @@ def do_scan(
         for alert in sym_alerts:
             _enrich_alert(alert, tf_ind, sym, sym_alerts)
 
-    return alerts, all_ind
+    return alerts, all_ind, rs_scores_all
 
 
 def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] | None = None):
@@ -937,6 +964,7 @@ async def async_main():
         min_confidence=config.get("alert", {}).get("min_confidence", 0.65),
     )
     scan_count = 0
+    warn_buf: dict[str, list[dict]] = {}
 
     def _wait_next_5m():
         now = datetime.utcnow()
@@ -971,7 +999,7 @@ async def async_main():
         scan_start = datetime.now()
         try:
             await _refresh_cache_if_stale()
-            alerts, all_ind = do_scan(symbols, cache, config)
+            alerts, all_ind, rs_scores_all = do_scan(symbols, cache, config)
 
             apply_mtf_boost(alerts)
 
@@ -1006,6 +1034,30 @@ async def async_main():
                 logger.info(f"Scan #{scan_count}: {len(filtered)} alerts, {len(ranks)} ranked ({'/'.join(f'{k}:{len(v)}' for k,v in buckets.items())})")
             else:
                 logger.info(f"Scan #{scan_count}: 0 push alerts (raw {len(alerts)} signals scanned)")
+
+            # ── 预警收集 ──
+            for sym, tf_ind in all_ind.items():
+                ind_5m = tf_ind.get("5m", {})
+                if not ind_5m:
+                    continue
+                state = SignalState(
+                    symbol=sym, timeframe="5m", ind=ind_5m,
+                    regime=get_regime(ind_5m), direction=get_direction(ind_5m),
+                    rs_scores=rs_scores_all.get(sym, {}),
+                    ind_1h=tf_ind.get("1h", {}),
+                )
+                ws = check_warnings(state)
+                if ws:
+                    warn_buf[sym] = ws
+
+            # ── 30m 整点推送预警 ──
+            now = datetime.utcnow()
+            if now.minute % 30 == 0:
+                w_report = format_warning_report(warn_buf, now)
+                if w_report:
+                    feishu.send(w_report)
+                    logger.info(f"Warnings pushed: {sum(len(v) for v in warn_buf.values())} items")
+                warn_buf.clear()
 
         except Exception as e:
             logger.error(f"Scan #{scan_count} error: {e}")
