@@ -1071,6 +1071,20 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         if vol_ratio > 0.6:
             check.append("⚡波动加速")
 
+    # ── 震荡判定 ──
+    adx_5m_val = (tf_ind.get("5m") or {}).get("adx", 0) or 0
+    adx_1h_val = (ind_1h or {}).get("adx", 0) or 0
+    if adx_5m_val < 18 and adx_1h_val < 18:
+        check.append("📦震荡")
+
+    # ── 4H边界 RSI反转 ──
+    if has_4h_boundary and alert.signal_type == "rsi_extreme":
+        bias_val = alert.details.get("macro_bias", "neutral")
+        if bias_val != "neutral":
+            counter = (bias_val == "long" and alert.direction == "short") or (bias_val == "short" and alert.direction == "long")
+            if counter:
+                check.append("✓4H反转")
+
     alert.checklist = check
 
 

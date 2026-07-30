@@ -241,6 +241,58 @@ def _check_rs_weakness(state: SignalState) -> dict | None:
 # 趋势回调信号
 # ═══════════════════════════════════════════════════════════════════════
 
+def _detect_double_bottom(df, atr, bullish: bool = True) -> bool:
+    """检测最近 ~15 根 5m K 线内的双底/双顶形态"""
+    if df is None or len(df) < 12:
+        return False
+    tail = df.tail(15).reset_index(drop=True)
+    lows = tail["low"].values
+    highs = tail["high"].values
+    n = len(tail)
+    if n < 5:
+        return False
+    tolerance = atr * 1.5
+    mid_offset = atr * 0.5
+    if bullish:
+        min_idx1 = int(np.argmin(lows[:n-3]))
+        min_val1 = lows[min_idx1]
+        min_idx2 = int(np.argmin(lows[min_idx1+3:])) + min_idx1 + 3
+        if min_idx2 >= n: min_idx2 = n - 1
+        min_val2 = lows[min_idx2]
+        if abs(min_val1 - min_val2) > tolerance:
+            return False
+        if min_val2 < min_val1:
+            return False
+        mid_range = highs[min(min_idx1, min_idx2):max(min_idx1, min_idx2)+1]
+        if len(mid_range) == 0:
+            return False
+        mid_high = np.max(mid_range)
+        if mid_high - max(min_val1, min_val2) < mid_offset:
+            return False
+        last_close = tail["close"].iloc[-1]
+        last_open = tail["open"].iloc[-1]
+        return last_close > last_open and last_close > tail["close"].iloc[-3]
+    else:
+        max_idx1 = int(np.argmax(highs[:n-3]))
+        max_val1 = highs[max_idx1]
+        max_idx2 = int(np.argmax(highs[max_idx1+3:])) + max_idx1 + 3
+        if max_idx2 >= n: max_idx2 = n - 1
+        max_val2 = highs[max_idx2]
+        if abs(max_val1 - max_val2) > tolerance:
+            return False
+        if max_val2 > max_val1:
+            return False
+        mid_range = lows[min(max_idx1, max_idx2):max(max_idx1, max_idx2)+1]
+        if len(mid_range) == 0:
+            return False
+        mid_low = np.min(mid_range)
+        if min(max_val1, max_val2) - mid_low < mid_offset:
+            return False
+        last_close = tail["close"].iloc[-1]
+        last_open = tail["open"].iloc[-1]
+        return last_close < last_open and last_close < tail["close"].iloc[-3]
+
+
 def _check_trend_pullback(state: SignalState) -> dict | None:
     ind_1h = state.ind_1h
     if not ind_1h:
@@ -254,60 +306,67 @@ def _check_trend_pullback(state: SignalState) -> dict | None:
     df_1h = ind_1h.get("df")
     close_5m = state.ind.get("close")
     atr_5m = state.ind.get("atr") or 1
+    df_5m = state.ind.get("df")
     if df_1h is None or len(df_1h) < 20 or not close_5m:
         return None
 
-    levels = find_swing_levels(df_1h, lookback=50)
     pinbar = state.ind.get("pinbar")
-    vr_5m = state.ind.get("volume_ratio") or 1
     body_dir = state.ind.get("body_dir")
     body_pct = state.ind.get("body_pct", 0)
     rsi_5m = state.ind.get("rsi")
+    ma20_1h = ind_1h.get("ma20")
 
+    levels = find_swing_levels(df_1h, lookback=50)
+    db_bull = _detect_double_bottom(df_5m, atr_5m, bullish=True)
+    db_bear = _detect_double_bottom(df_5m, atr_5m, bullish=False)
+
+    def _reversal_check(bullish: bool):
+        if bullish:
+            if pinbar == "bullish": return True, "Pinbar"
+            if db_bull: return True, "双底"
+            if rsi_5m is not None and rsi_5m < 40 and body_dir == "bullish" and body_pct > 0.3:
+                return True, f"RSI{rsi_5m:.0f}+阳线"
+        else:
+            if pinbar == "bearish": return True, "Pinbar"
+            if db_bear: return True, "双顶"
+            if rsi_5m is not None and rsi_5m > 60 and body_dir == "bearish" and body_pct > 0.3:
+                return True, f"RSI{rsi_5m:.0f}+阴线"
+        return False, ""
+
+    def _try_fire(bullish: bool, price_ref: float, evidence_ref: str, confidence: float):
+        dist = abs(close_5m - price_ref) if price_ref else 0
+        if dist > atr_5m * 1.2:
+            return None
+        ok, rev_type = _reversal_check(bullish)
+        if not ok:
+            return None
+        sev = "critical" if dist <= atr_5m * 0.5 else "high"
+        return {
+            "direction": "long" if bullish else "short",
+            "severity": sev,
+            "confidence": confidence,
+            "evidence": evidence_ref + f" {rev_type}",
+        }
+
+    # ── 1H 极点支撑/阻力 ──
     for lvl in levels:
         if lvl.touch_count < 2:
             continue
-        dist = abs(close_5m - lvl.price)
+        if ma_1h == "bullish" and lvl.side == "support":
+            r = _try_fire(True, lvl.price, f"趋势回调多 1H支撑{lvl.price:.5g}({lvl.touch_count}触)", 0.78 if pinbar == "bullish" else 0.70)
+            if r: return r
+        elif ma_1h == "bearish" and lvl.side == "resistance":
+            r = _try_fire(False, lvl.price, f"趋势回调空 1H阻力{lvl.price:.5g}({lvl.touch_count}触)", 0.78 if pinbar == "bearish" else 0.70)
+            if r: return r
 
-        # ── 做多: 1H多头 + 5m回踩到1H支撑 + 反转确认 ──
-        if ma_1h == "bullish" and lvl.side == "support" and dist <= atr_5m * 1.2:
-            reversal = False
-            rev_type = ""
-            if pinbar == "bullish":
-                reversal = True
-                rev_type = "Pinbar"
-            elif rsi_5m is not None and rsi_5m < 40 and body_dir == "bullish" and body_pct > 0.3:
-                reversal = True
-                rev_type = f"RSI{rsi_5m:.0f}+阳线"
-            if reversal:
-                conf = 0.78 if pinbar == "bullish" else 0.70
-                sev = "critical" if dist <= atr_5m * 0.5 else "high"
-                return {
-                    "direction": "long",
-                    "severity": sev,
-                    "confidence": conf,
-                    "evidence": f"趋势回调多 1H支撑{lvl.price:.5g}({lvl.touch_count}触) {rev_type}",
-                }
-
-        # ── 做空: 1H空头 + 5m反弹到1H阻力 + 反转确认 ──
-        elif ma_1h == "bearish" and lvl.side == "resistance" and dist <= atr_5m * 1.2:
-            reversal = False
-            rev_type = ""
-            if pinbar == "bearish":
-                reversal = True
-                rev_type = "Pinbar"
-            elif rsi_5m is not None and rsi_5m > 60 and body_dir == "bearish" and body_pct > 0.3:
-                reversal = True
-                rev_type = f"RSI{rsi_5m:.0f}+阴线"
-            if reversal:
-                conf = 0.78 if pinbar == "bearish" else 0.70
-                sev = "critical" if dist <= atr_5m * 0.5 else "high"
-                return {
-                    "direction": "short",
-                    "severity": sev,
-                    "confidence": conf,
-                    "evidence": f"趋势回调空 1H阻力{lvl.price:.5g}({lvl.touch_count}触) {rev_type}",
-                }
+    # ── 1H MA20 支撑/阻力 (无极点时替代) ──
+    if ma20_1h and close_5m:
+        if ma_1h == "bullish" and close_5m > ma20_1h:
+            r = _try_fire(True, ma20_1h, f"趋势回调多 MA20{ma20_1h:.5g}", 0.65)
+            if r: return r
+        elif ma_1h == "bearish" and close_5m < ma20_1h:
+            r = _try_fire(False, ma20_1h, f"趋势回调空 MA20{ma20_1h:.5g}", 0.65)
+            if r: return r
 
     return None
 
