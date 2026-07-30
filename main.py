@@ -402,10 +402,10 @@ def fmt_short_alert(a: Alert) -> str:
     rs_str = f" RS:{rs}{rs_d_str}" if rs else ""
     margin = m.get("margin", "")
     margin_str = f" 💰{margin}" if margin else ""
-    persist = "" if is_new else " 持续中"
+    persist = "" if is_new else " [持续中]"
 
-    line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
-    line2 = f"   S:{s} R:{r} | {checks}"
+    line = f"▸ {icon} {sym} {d} {a.name}{persist}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
+    line2 = f"    S:{s} R:{r}  |  {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
     opt_line = f"\n   最优: {opt_entry}→RR:{opt_rr}" if opt_entry and opt_rr else ""
@@ -506,7 +506,7 @@ def format_consolidated_report(
     shorts = sum(1 for a in quality if a.direction == "short")
 
     lines = [f"━━━ {cat_prefix}V2 扫描 {time_str} {_current_session()} ━━━",
-             f"{symbol_count}币 | {total_alerts}信号 | 推送{len(merged_list)}条 | 多{longs}/空{shorts}"]
+             f"{symbol_count}币 · {total_alerts}信号 · 推送{len(merged_list)}条 · 多{longs}/空{shorts}"]
 
     if merged_list:
         lines.append("")
@@ -529,7 +529,7 @@ def format_consolidated_report(
             d = {"long": "多", "short": "空"}.get(r.direction, "")
             tags = "/".join(r.signal_tags[:3])
             reason = "/".join(r.reasons[:2])
-            lines.append(f"{i}. {sym} {d} {r.score:.0%} | {tags} | {reason}")
+            lines.append(f"  {i}. {sym} {d} {r.score:.0%}  {tags} · {reason}")
 
     return "\n".join(lines)
 
@@ -1287,9 +1287,9 @@ async def async_main():
                     ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} ━━━\n{ms['desc']}\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
                     if btc_funding is not None:
                         crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
-                        ms_line += f" | 费率:{btc_funding:+.3f}%{crowd}"
+                        ms_line += f" · 费率:{btc_funding:+.3f}%{crowd}"
                     if rs_dispersion > 5:
-                        ms_line += f" | RS分化:σ={rs_dispersion:.0f}"
+                        ms_line += f" · RS分化:σ={rs_dispersion:.0f}"
                     feishu.send(ms_line)
 
                 buckets: dict[str, list[Alert]] = {}
