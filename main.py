@@ -922,18 +922,14 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             check.remove("✗方向")
             check.append("⚠逆1H")
 
-    # ── 仓位计算 ──
+    # ── 仓位参考: 1×1H ATR 标准距离, 1%本金风险 ──
     try:
-        with open("config.yaml") as f:
-            acct = yaml.safe_load(f).get("account", {})
-        risk_pct = acct.get("risk_pct", 15)
-        leverage = acct.get("leverage", 10)
-        if sl_dist > 0:
-            margin_pct = entry_price * risk_pct / (sl_dist * leverage)
-            if margin_pct <= 100:
-                alert.meta["margin"] = f"仓位{margin_pct:.0f}%({leverage}x 险1%)"
-            else:
-                alert.meta["margin"] = f"⚠SL过紧 需{margin_pct:.0f}%仓({leverage}x)"
+        risk_pct = 1
+        leverage = 10
+        risk_dist = atr_1h * 1.0
+        if entry_price > 0 and risk_dist > 0:
+            pos_pct = entry_price * risk_pct / (risk_dist * leverage)
+            alert.meta["margin"] = f"参考{pos_pct:.0f}%({leverage}x 1ATR)" if pos_pct <= 100 else f"⚠波大参考{pos_pct:.0f}%"
     except Exception:
         pass
 
