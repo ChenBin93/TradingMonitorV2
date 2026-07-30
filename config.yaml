@@ -63,7 +63,7 @@ logging:
   level: INFO
   file: logs/main.log
 account:
-  risk_pct: 15
+  risk_pct: 1
   leverage: 10
 watchlist:
 - BTC/USDT:USDT

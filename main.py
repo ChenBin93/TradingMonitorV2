@@ -400,9 +400,11 @@ def fmt_short_alert(a: Alert) -> str:
     rs_delta = a.details.get("rs_delta")
     rs_d_str = f"↑{rs_delta:+.0f}" if rs_delta and rs_delta > 0 else f"↓{rs_delta:+.0f}" if rs_delta and rs_delta < 0 else ""
     rs_str = f" RS:{rs}{rs_d_str}" if rs else ""
+    margin = m.get("margin", "")
+    margin_str = f" 💰{margin}" if margin else ""
     persist = "" if is_new else " 持续中"
 
-    line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{entry_timer}{pos_hint}{rs_str}"
+    line = f"{icon} {sym} {d} {a.name}{persist} RR:{rr} {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
     line2 = f"   S:{s} R:{r} | {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
@@ -929,10 +931,9 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         if sl_dist > 0:
             margin_pct = entry_price * risk_pct / (sl_dist * leverage)
             if margin_pct <= 100:
-                alert.meta["margin"] = f"保证金{margin_pct:.0f}%({leverage}x)"
+                alert.meta["margin"] = f"仓位{margin_pct:.0f}%({leverage}x 险1%)"
             else:
-                need_lev = int(margin_pct * leverage / 100) + 1
-                alert.meta["margin"] = f"保证金{margin_pct:.0f}%({leverage}x)→需{need_lev}x"
+                alert.meta["margin"] = f"⚠SL过紧 需{margin_pct:.0f}%仓({leverage}x)"
     except Exception:
         pass
 
