@@ -1122,6 +1122,12 @@ def apply_mtf_boost(alerts: list[Alert]):
                     a.details["mtf_timeframes"] = list(tfs)
 
 
+def _active_symbols(all_symbols: list[str]) -> list[str]:
+    if _is_us_market_hours():
+        return all_symbols
+    return [s for s in all_symbols if not _is_us_stock(s)]
+
+
 # =============================================================================
 # 异步主入口
 # =============================================================================
@@ -1160,6 +1166,7 @@ async def async_main():
     )
 
     symbols = get_symbols(okx, config)
+    active_symbols = _active_symbols(symbols)
     timeframes = config["timeframes"]
     logger.info(f"Monitoring {len(symbols)} symbols x {len(timeframes)} timeframes")
 
@@ -1246,7 +1253,7 @@ async def async_main():
                         refreshed += 1
                 except Exception:
                     pass
-        await asyncio.gather(*[_fetch(s, t) for s in symbols for t in timeframes])
+        await asyncio.gather(*[_fetch(s, t) for s in active_symbols for t in timeframes])
         if refreshed > 0:
             logger.debug(f"REST cache refresh: {refreshed} bars")
 
@@ -1255,8 +1262,11 @@ async def async_main():
         scan_count += 1
         scan_start = datetime.now()
         try:
+            active_symbols = _active_symbols(symbols)
+            if len(active_symbols) < len(symbols):
+                logger.debug(f"Off-market hours: {len(symbols) - len(active_symbols)} US stocks skipped")
             await _refresh_cache_if_stale()
-            alerts, all_ind, rs_scores_all = do_scan(symbols, cache, config)
+            alerts, all_ind, rs_scores_all = do_scan(active_symbols, cache, config)
 
             # ── 拥挤度: BTC 资金费率 ──
             btc_funding = None
