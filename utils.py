@@ -1,8 +1,24 @@
-# 工具：日志 + 健康检查
+# 工具：日志 + 健康检查 + 价格格式化
 
+import math
 import threading
-import time
 from pathlib import Path
+
+
+def fmt_price(p: float, atr: float = 1.0) -> str:
+    """ATR 自适应精度：精度比 ATR 小一个数量级"""
+    if p == 0:
+        return "0"
+    decimals = max(0, -int(math.log10(max(atr, 1e-12) / 10)))
+    return f"{p:.{decimals}f}"
+
+
+def round_price(p: float, atr: float = 1.0) -> float:
+    """ATR 自适应精度四舍五入，返回浮点数"""
+    if p == 0:
+        return 0.0
+    decimals = max(0, -int(math.log10(max(atr, 1e-12) / 10)))
+    return round(p, decimals)
 
 
 def setup_logging(level: str = "INFO", log_file: str = "logs/main.log"):

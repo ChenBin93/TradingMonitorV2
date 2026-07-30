@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 from typing import Optional
+from utils import round_price
 
 
 @dataclass
@@ -61,13 +62,7 @@ def find_swing_levels(df: pd.DataFrame, lookback: int = 50) -> list[Level]:
                 avg_price = float(np.median([p for _, p in cluster]))
                 last_idx = max(idx for idx, _ in cluster)
                 strength = "强" if len(cluster) >= 3 else "中"
-                # 根据价格量级四舍五入：>100 → 整数, >1 → 1位小数, 其余2位
-                if avg_price > 100:
-                    price = round(avg_price)
-                elif avg_price > 1:
-                    price = round(avg_price, 1)
-                else:
-                    price = round(avg_price, 5)
+                price = round_price(avg_price, atr)
                 levels.append(Level(
                     price=price,
                     touch_count=len(cluster),

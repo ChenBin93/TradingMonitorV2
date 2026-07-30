@@ -1,5 +1,8 @@
 def compute_market_state(tf_ind: dict) -> dict:
     """从全量指标池生成市场状态报告, 聚焦 BTC 做风向标"""
+    from support_resistance import find_swing_levels, get_nearest_levels
+    from utils import fmt_price
+
     btc_key = "BTC/USDT:USDT"
     sym = btc_key if btc_key in tf_ind else next(iter(tf_ind.keys()), None)
     if not sym:
@@ -53,18 +56,15 @@ def compute_market_state(tf_ind: dict) -> dict:
     df_1h = ind_1h.get("df")
     if df_1h is not None and len(df_1h) >= 20 and btc_price:
         try:
-            from support_resistance import find_swing_levels, get_nearest_levels
             levels = find_swing_levels(df_1h, lookback=50)
             support, resistance = get_nearest_levels(levels, btc_price)
             parts = []
             if support:
                 p = support.price
-                sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
-                parts.append(f"支撑:{sf}({support.strength},{support.touch_count}触)")
+                parts.append(f"支撑:{fmt_price(p, btc_atr_1h)}({support.strength},{support.touch_count}触)")
             if resistance:
                 p = resistance.price
-                sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
-                parts.append(f"阻力:{sf}({resistance.strength},{resistance.touch_count}触)")
+                parts.append(f"阻力:{fmt_price(p, btc_atr_1h)}({resistance.strength},{resistance.touch_count}触)")
             sr_str = " · ".join(parts) if parts else ""
         except Exception:
             pass

@@ -14,7 +14,7 @@ from okx import OKXClient, KlineCache, Candle
 from indicators import compute as compute_indicators
 from signals import SIGNALS, SignalState, get_direction, get_regime, is_compressing, check_warnings, check_brewing
 from notify import Feishu
-from utils import setup_logging, start_health_server
+from utils import setup_logging, start_health_server, fmt_price
 from support_resistance import find_swing_levels, get_nearest_levels
 from volume_profile import compute_volume_profile, get_nearest_nodes
 from market_state import compute_market_state
@@ -768,13 +768,11 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
 
         if support:
             p = support.price
-            sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
-            alert.meta["support"] = f"{sf}({support.strength},{support.touch_count}触)"
+            alert.meta["support"] = f"{fmt_price(p, atr_1h)}({support.strength},{support.touch_count}触)"
             sr_info["support"] = support
         if resistance:
             p = resistance.price
-            sf = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
-            alert.meta["resistance"] = f"{sf}({resistance.strength},{resistance.touch_count}触)"
+            alert.meta["resistance"] = f"{fmt_price(p, atr_1h)}({resistance.strength},{resistance.touch_count}触)"
             sr_info["resistance"] = resistance
 
         pos_in_range = None
@@ -833,9 +831,8 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         sl = entry_price - atr_5m * 1.5
         tp = entry_price + atr_1h * 1.5
 
-    sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.5f}"
-    alert.meta["sl"] = sf.format(sl)
-    alert.meta["tp"] = sf.format(tp)
+    alert.meta["sl"] = fmt_price(sl, atr_1h)
+    alert.meta["tp"] = fmt_price(tp, atr_1h)
     sl_dist = abs(entry_price - sl)
     tp_dist = abs(tp - entry_price)
     rr = tp_dist / sl_dist if sl_dist > 0 else 0
@@ -869,8 +866,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
 
         if (opt_entry_price and abs(opt_entry_price - entry_price) <= atr_1h * 2
                 and opt_rr_val > rr and opt_rr_val >= 2.0):
-            sf_opt = "{:.0f}" if opt_entry_price > 100 else "{:.1f}" if opt_entry_price > 1 else "{:.5f}"
-            alert.meta["opt_entry"] = sf_opt.format(opt_entry_price)
+            alert.meta["opt_entry"] = fmt_price(opt_entry_price, atr_1h)
             alert.meta["opt_rr"] = f"{opt_rr_val:.1f}:1"
             if touches >= 3:
                 check.append("🔵左侧挂单")
@@ -887,12 +883,10 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
                 vp_nodes = get_nearest_nodes(vp, current_price)
                 if vp_nodes["support"]:
                     p = vp_nodes["support"]["price"]
-                    sp = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
-                    alert.meta["vp_support"] = f"{sp}(量节点)"
+                    alert.meta["vp_support"] = f"{fmt_price(p, atr_1h)}(量节点)"
                 if vp_nodes["resistance"]:
                     p = vp_nodes["resistance"]["price"]
-                    sp = f"{p:.0f}" if p > 100 else f"{p:.1f}" if p > 1 else f"{p:.5f}"
-                    alert.meta["vp_resistance"] = f"{sp}(量节点)"
+                    alert.meta["vp_resistance"] = f"{fmt_price(p, atr_1h)}(量节点)"
 
                 if touches == 2 and opt_entry_price:
                     upgraded = False
@@ -1022,33 +1016,31 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
 
     # ── ATR 移动止损 ──
     if entry_price > 0 and atr_1h > 0:
-        sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.5f}"
         if alert.direction == "long":
             move_price = entry_price + atr_1h * 2
             if tp > entry_price and move_price < tp:
-                alert.meta["trailing"] = f"移损@{sf.format(entry_price+atr_1h*0.5)}(+2ATR移保本)"
+                alert.meta["trailing"] = f"移损@{fmt_price(entry_price+atr_1h*0.5, atr_1h)}(+2ATR移保本)"
         elif alert.direction == "short":
             move_price = entry_price - atr_1h * 2
             if tp < entry_price and move_price > tp:
-                alert.meta["trailing"] = f"移损@{sf.format(entry_price-atr_1h*0.5)}(+2ATR移保本)"
+                alert.meta["trailing"] = f"移损@{fmt_price(entry_price-atr_1h*0.5, atr_1h)}(+2ATR移保本)"
 
     # ── 分批止盈 ──
     if entry_price > 0 and atr_1h > 0 and tp != 0:
-        sf = "{:.0f}" if entry_price > 100 else "{:.1f}" if entry_price > 1 else "{:.5f}"
         if alert.direction == "long" and tp > entry_price:
             tp1 = entry_price + atr_5m * 0.8
             if tp1 < tp:
-                alert.meta["tp1"] = f"{sf.format(tp1)}(40%)"
-                alert.meta["tp2"] = f"{sf.format(tp)}(30%)"
+                alert.meta["tp1"] = f"{fmt_price(tp1, atr_1h)}(40%)"
+                alert.meta["tp2"] = f"{fmt_price(tp, atr_1h)}(30%)"
             else:
-                alert.meta["tp_full"] = f"{sf.format(tp)}(70%)"
+                alert.meta["tp_full"] = f"{fmt_price(tp, atr_1h)}(70%)"
         elif alert.direction == "short" and tp < entry_price:
             tp1 = entry_price - atr_5m * 0.8
             if tp1 > tp:
-                alert.meta["tp1"] = f"{sf.format(tp1)}(40%)"
-                alert.meta["tp2"] = f"{sf.format(tp)}(30%)"
+                alert.meta["tp1"] = f"{fmt_price(tp1, atr_1h)}(40%)"
+                alert.meta["tp2"] = f"{fmt_price(tp, atr_1h)}(30%)"
             else:
-                alert.meta["tp_full"] = f"{sf.format(tp)}(70%)"
+                alert.meta["tp_full"] = f"{fmt_price(tp, atr_1h)}(70%)"
 
     # ── 拥挤度 ──
     funding = alert.details.get("btc_funding")
