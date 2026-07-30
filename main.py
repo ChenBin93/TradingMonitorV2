@@ -468,7 +468,7 @@ def format_consolidated_report(
                 rr_val = float(rr_str)
             except ValueError:
                 rr_val = 0
-            if rr_val < 1.5:
+            if rr_val < 1.2:
                 continue
             has_dir_fail = any(c == "✗方向" for c in a.checklist)
             if has_dir_fail:
@@ -936,9 +936,9 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     except Exception:
         pass
 
-    if rr >= 2.0:
+    if rr >= 1.5:
         check.append("✓盈亏比")
-    elif rr >= 1.5:
+    elif rr >= 1.2:
         check.append("⚠盈亏比")
     else:
         check.append("✗盈亏比")
