@@ -431,6 +431,7 @@ def format_warning_report(warnings: dict[str, list[dict]], scan_time: datetime) 
     time_str = scan_time.strftime("%H:%M")
     icon_map = {
         "near_sr": "🔵", "coiling": "⚡", "rsi_approaching": "🟠", "rs_moving": "🔵",
+        "bb_explosion": "💥",
     }
 
     lines = [f"━━━ ⚡预警 {time_str} {_current_session()} ━━━"]
@@ -1084,6 +1085,21 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             counter = (bias_val == "long" and alert.direction == "short") or (bias_val == "short" and alert.direction == "long")
             if counter:
                 check.append("✓4H反转")
+
+    # ── BB 带区域 ──
+    ma20_1h = (ind_1h or {}).get("ma20")
+    bbw_1h = (ind_1h or {}).get("bb_width")
+    if ma20_1h and bbw_1h and current_price and bbw_1h > 0:
+        bb_upper = ma20_1h * (1 + bbw_1h / 200)
+        bb_lower = ma20_1h * (1 - bbw_1h / 200)
+        if current_price > bb_upper:
+            check.append("📈BB上轨")
+        elif current_price > ma20_1h:
+            check.append("📈BB偏上")
+        elif current_price < bb_lower:
+            check.append("📉BB下轨")
+        elif current_price < ma20_1h:
+            check.append("📉BB偏下")
 
     alert.checklist = check
 

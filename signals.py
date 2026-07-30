@@ -368,6 +368,18 @@ def _check_trend_pullback(state: SignalState) -> dict | None:
             r = _try_fire(False, ma20_1h, f"趋势回调空 MA20{ma20_1h:.5g}", 0.65)
             if r: return r
 
+    # ── 1H BB band 支撑/阻力 (无极点 & MA20不适用时替代) ──
+    bbw_1h = ind_1h.get("bb_width")
+    if ma20_1h and bbw_1h and close_5m and bbw_1h > 0:
+        bb_lower = ma20_1h * (1 - bbw_1h / 200)
+        bb_upper = ma20_1h * (1 + bbw_1h / 200)
+        if ma_1h == "bullish" and close_5m > bb_lower:
+            r = _try_fire(True, bb_lower, f"趋势回调多 BB下轨{bb_lower:.5g}", 0.60)
+            if r: return r
+        elif ma_1h == "bearish" and close_5m < bb_upper:
+            r = _try_fire(False, bb_upper, f"趋势回调空 BB上轨{bb_upper:.5g}", 0.60)
+            if r: return r
+
     return None
 
 
@@ -558,6 +570,18 @@ def _check_rsi_approaching(state: SignalState) -> dict | None:
     return None
 
 
+def _check_bb_explosion(state: SignalState) -> dict | None:
+    """BB 收口后开始扩张 → 波动率释放, 大行情前兆"""
+    bb_state = state.ind.get("bb_state", "")
+    ts = state.ind.get("ttm_squeeze")
+    fired = ts.get("is_fired", False) if ts else False
+    squeeze_bars = ts.get("squeeze_bars", 0) if ts else 0
+    if bb_state == "expanding" and (fired or squeeze_bars >= 8):
+        evidence = f"BB爆破 {'TTM释放' if fired else f'压{squeeze_bars}根'}"
+        return {"type": "bb_explosion", "evidence": evidence}
+    return None
+
+
 def _check_rs_moving(state: SignalState) -> dict | None:
     rs5 = state.rs_scores.get("5m", {})
     score = rs5.get("score", 0)
@@ -572,6 +596,7 @@ WARNINGS: list[WarningDef] = [
     WarningDef("coiling",        "蓄力待发",   _check_coiling),
     WarningDef("rsi_approaching","RSI趋近",    _check_rsi_approaching),
     WarningDef("rs_moving",      "RS异动",     _check_rs_moving),
+    WarningDef("bb_explosion",   "BB爆破",     _check_bb_explosion),
 ]
 
 
