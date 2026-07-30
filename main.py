@@ -3,7 +3,7 @@ import signal
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
@@ -19,6 +19,13 @@ from support_resistance import find_swing_levels, get_nearest_levels
 from volume_profile import compute_volume_profile, get_nearest_nodes
 from market_state import compute_market_state
 from relative_strength import compute_rs
+
+BJ_TZ = timezone(timedelta(hours=8))
+
+
+def _bj_now() -> datetime:
+    return datetime.now(timezone.utc).astimezone(BJ_TZ)
+
 
 _US_STOCKS = {
     "AAPL/USDT:USDT", "MSFT/USDT:USDT", "GOOGL/USDT:USDT", "AMZN/USDT:USDT",
@@ -217,17 +224,19 @@ def _is_us_stock(symbol: str) -> bool:
 
 
 _SESSION_LABELS = [
-    (0, 7, "🌙", "亚洲"),
-    (7, 13, "🌅", "欧洲"),
-    (13, 21, "🌇", "美盘"),
-    (21, 24, "🌃", "低流动"),
+    (0, 5, "🌙", "美盘"),
+    (5, 8, "🌃", "低流动"),
+    (8, 15, "🌅", "亚洲"),
+    (15, 21, "🌇", "欧洲"),
 ]
 
 def _current_session() -> str:
-    now = datetime.utcnow()
+    now = _bj_now()
     if now.weekday() >= 5:
         return "🌃周末"
     hour = now.hour + now.minute / 60.0
+    if hour >= 21:
+        return "🌙美盘"
     for start, end, icon, label in _SESSION_LABELS:
         if start <= hour < end:
             return f"{icon}{label}"
@@ -270,9 +279,9 @@ def _symbol_bias(tf_ind: dict) -> str:
 
 def _is_us_market_hours() -> bool:
     try:
-        now = datetime.now()
-        start = datetime(now.year, now.month, now.day, 13, 30)
-        end = datetime(now.year, now.month, now.day, 21, 0)
+        now = datetime.now(timezone.utc)
+        start = datetime(now.year, now.month, now.day, 13, 30, tzinfo=timezone.utc)
+        end = datetime(now.year, now.month, now.day, 21, 0, tzinfo=timezone.utc)
         if now.weekday() >= 5:
             return False
         return start <= now <= end
@@ -1260,7 +1269,7 @@ async def async_main():
     while True:
         await asyncio.sleep(_wait_next_5m())
         scan_count += 1
-        scan_start = datetime.now()
+        scan_start = _bj_now()
         try:
             active_symbols = _active_symbols(symbols)
             if len(active_symbols) < len(symbols):
@@ -1307,16 +1316,23 @@ async def async_main():
 
             if active:
                 ms = compute_market_state(all_ind)
-                if ms["bias"] != "neutral":
-                    bias_icon = "🔺" if ms["bias"] == "long" else "🔻"
-                    bias_text = "做多" if ms["bias"] == "long" else "做空"
-                    ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} ━━━\n{ms['desc']}\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
-                    if btc_funding is not None:
-                        crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
-                        ms_line += f" · 费率:{btc_funding:+.3f}%{crowd}"
-                    if rs_dispersion > 5:
-                        ms_line += f" · RS分化:σ={rs_dispersion:.0f}"
-                    feishu.send(ms_line)
+                bias_icon = "🔺" if ms["bias"] == "long" else "🔻" if ms["bias"] == "short" else "⏸"
+                bias_text = "做多" if ms["bias"] == "long" else "做空" if ms["bias"] == "short" else "观望"
+
+                ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()} ━━━\n"
+                ms_line += f"{ms['desc']}\n"
+                ms_line += f"{ms['h1_line']}"
+                if ms.get("sr"):
+                    ms_line += f"\n{ms['sr']}"
+                if ms.get("breadth"):
+                    ms_line += f" | {ms['breadth']}"
+                ms_line += f"\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
+                if btc_funding is not None:
+                    crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
+                    ms_line += f" · 费率:{btc_funding:+.3f}%{crowd}"
+                if rs_dispersion > 5:
+                    ms_line += f" · RS分化:σ={rs_dispersion:.0f}"
+                feishu.send(ms_line)
 
                 buckets: dict[str, list[Alert]] = {}
                 for a in active:
@@ -1371,7 +1387,7 @@ async def async_main():
                     brew_buf.setdefault(sym, []).extend(bs)
 
             # ── 30m 整点推送预警 (首次扫描立即推) ──
-            now = datetime.utcnow()
+            now = _bj_now()
             if now.minute % 30 == 0 or scan_count == 1:
                 w_report = format_warning_report(warn_buf, now)
                 if w_report:
