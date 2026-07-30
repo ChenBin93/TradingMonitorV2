@@ -808,12 +808,12 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     sl = tp = 0
 
     if alert.direction == "long":
-        sl = sr_info["support"].price - atr_5m * 0.3 if "support" in sr_info else entry_price - atr_5m * 1.5
+        sl = sr_info["support"].price - atr_1h * 0.3 if "support" in sr_info else entry_price - atr_5m * 1.5
         tp = sr_info["resistance"].price if "resistance" in sr_info else entry_price + atr_1h * 2.5
         if tp <= sl or tp <= entry_price or (tp - entry_price) < (entry_price - sl) * 1.5:
             tp = entry_price + atr_1h * 2.5
     elif alert.direction == "short":
-        sl = sr_info["resistance"].price + atr_5m * 0.3 if "resistance" in sr_info else entry_price + atr_5m * 1.5
+        sl = sr_info["resistance"].price + atr_1h * 0.3 if "resistance" in sr_info else entry_price + atr_5m * 1.5
         tp = sr_info["support"].price if "support" in sr_info else entry_price - atr_1h * 2.5
         if tp >= sl or tp >= entry_price or (entry_price - tp) < (sl - entry_price) * 1.5:
             tp = entry_price - atr_1h * 2.5
