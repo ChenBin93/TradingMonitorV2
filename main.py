@@ -235,25 +235,35 @@ def _current_session() -> str:
 
 
 def _symbol_bias(tf_ind: dict) -> str:
-    """4H+1H 宏观方向判定: long / short / neutral"""
+    """4H MA20/MA60+ADX 稳定趋势判定, 1H MA排列仅做动量确认"""
     ind_4h = tf_ind.get("4h", {})
     ind_1h = tf_ind.get("1h", {})
-    ma_4h = ind_4h.get("ma_alignment", "neutral") if ind_4h else "neutral"
-    ma_1h = ind_1h.get("ma_alignment", "neutral") if ind_1h else "neutral"
+    if not ind_4h or not ind_1h:
+        return "neutral"
+
+    close_4h = ind_4h.get("close")
+    ma20_4h = ind_4h.get("ma20")
+    ma60_4h = ind_4h.get("ma60")
     adx_4h = ind_4h.get("adx", 0) or 0
     adx_1h = ind_1h.get("adx", 0) or 0
+    ma_1h = ind_1h.get("ma_alignment", "neutral")
 
-    if ma_4h == "bullish" and ma_1h == "bullish":
+    if close_4h is None:
+        return "neutral"
+    above_ma20 = ma20_4h and close_4h > ma20_4h
+    above_ma60 = ma60_4h and close_4h > ma60_4h
+
+    if above_ma20 and above_ma60 and adx_4h >= 20 and ma_1h == "bullish":
         return "long"
-    if ma_4h == "bearish" and ma_1h == "bearish":
+    if not above_ma20 and not above_ma60 and adx_4h >= 20 and ma_1h == "bearish":
         return "short"
-    if ma_4h == "bullish" and adx_4h >= 20:
+    if above_ma20 and above_ma60 and ma_1h == "bullish" and adx_1h >= 20:
         return "long"
-    if ma_4h == "bearish" and adx_4h >= 20:
+    if not above_ma20 and not above_ma60 and ma_1h == "bearish" and adx_1h >= 20:
         return "short"
-    if ma_1h == "bullish" and adx_1h >= 25:
+    if above_ma60 and adx_4h >= 18:
         return "long"
-    if ma_1h == "bearish" and adx_1h >= 25:
+    if not above_ma60 and adx_4h >= 18:
         return "short"
     return "neutral"
 
@@ -703,14 +713,29 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     else:
         check.append("?方向")
 
+    # ── 4H 大结构边界 (提前检测, 供趋势判断参考) ──
+    ind_4h = tf_ind.get("4h", {})
+    current_price = (ind_1h or tf_ind.get("5m", {})).get("close") if ind_1h else None
+    atr_1h = (ind_1h or tf_ind.get("5m", {})).get("atr") or 1
+    has_4h_boundary = False
+    df_4h = ind_4h.get("df")
+    if df_4h is not None and len(df_4h) >= 20 and current_price:
+        levels_4h = find_swing_levels(df_4h, lookback=50)
+        for lvl in levels_4h:
+            if lvl.touch_count >= 2 and abs(current_price - lvl.price) <= atr_1h * 2.5:
+                alert.meta["4h_boundary"] = f"4H{lvl.side}{lvl.price:.5g}"
+                has_4h_boundary = True
+                check.append("⚠4H边界")
+                break
+
     # ── 宏观趋势: 4H+1H 方向一致性 ──
     bias = _symbol_bias(tf_ind)
     alert.details["macro_bias"] = bias
     if bias != "neutral":
         counter = (bias == "long" and sig_dir == "short") or (bias == "short" and sig_dir == "long")
         if counter:
-            if alert.signal_type == "fakeout":
-                check.append("✓反趋势")
+            if alert.signal_type == "fakeout" or has_4h_boundary:
+                check.append("✓反趋势" if not has_4h_boundary else "✓4H反转")
             else:
                 check.append("✗趋势")
                 alert.confidence = min(alert.confidence * 0.65, 0.60)
