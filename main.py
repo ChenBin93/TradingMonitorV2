@@ -401,7 +401,18 @@ def fmt_short_alert(a: Alert) -> str:
     margin_str = f" 💰{margin}" if margin else ""
     persist = "" if is_new else " [持续中]"
 
-    line = f"▸ {icon} {sym} {d} {a.name}{persist}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
+    # ── 行情状态标记 (回测: 强顺势60.3%/中顺势56.7%/贴均线49.4%/回调35-44%) ──
+    regime_icons = {
+        "strong_trend": "⚡强顺势",
+        "mid_trend": "✅顺势",
+        "at_ma": "➖贴均线",
+        "pullback": "⛔回调",
+        "no_trend": "⛔无趋势",
+    }
+    regime = a.details.get("market_regime", "")
+    regime_str = f" {regime_icons.get(regime, '')}" if regime else ""
+
+    line = f"▸ {icon} {sym} {d} {a.name}{persist}{regime_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
     line2 = f"    S:{s} R:{r}  |  {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
@@ -1287,6 +1298,24 @@ async def async_main():
             breadth_parts = [b for b in [ms.get("breadth_1h"), ms.get("breadth_4h")] if b]
             if breadth_parts:
                 ms_line += f"\n" + " · ".join(breadth_parts)
+            # ── 当前行情状态 (BTC 视角) ──
+            from market_state import market_regime
+            btc_ind = all_ind.get("BTC/USDT:USDT", {})
+            btc_4h = btc_ind.get("4h", {})
+            btc_1h = btc_ind.get("1h", {})
+            if btc_4h:
+                btc_bias = _symbol_bias(btc_ind)
+                btc_regime = market_regime(
+                    btc_bias,
+                    btc_4h.get("close"), btc_4h.get("ma20"),
+                    btc_4h.get("atr") or 1,
+                    "long" if btc_bias == "long" else "short" if btc_bias == "short" else "long",
+                )
+                regime_icons = {
+                    "strong_trend": "⚡强顺势", "mid_trend": "✅顺势",
+                    "at_ma": "➖贴均线", "pullback": "⛔回调", "no_trend": "⛔无趋势",
+                }
+                ms_line += f"\n行情状态: {regime_icons.get(btc_regime, btc_regime)}"
             ms_line += f"\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
             if btc_funding is not None:
                 crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
