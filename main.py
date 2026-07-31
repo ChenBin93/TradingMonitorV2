@@ -401,18 +401,12 @@ def fmt_short_alert(a: Alert) -> str:
     margin_str = f" 💰{margin}" if margin else ""
     persist = "" if is_new else " [持续中]"
 
-    # ── 行情状态标记 (回测: 强顺势60.3%/中顺势56.7%/贴均线49.4%/回调35-44%) ──
-    regime_icons = {
-        "strong_trend": "⚡强顺势",
-        "mid_trend": "✅顺势",
-        "at_ma": "➖贴均线",
-        "pullback": "⛔回调",
-        "no_trend": "⛔无趋势",
-    }
-    regime = a.details.get("market_regime", "")
-    regime_str = f" {regime_icons.get(regime, '')}" if regime else ""
+    # ── 宏观趋势标记 (修复后真实 edge: bias一致 +1.9pp) ──
+    bias = a.details.get("macro_bias", "")
+    bias_icons = {"long": "📈4H多", "short": "📉4H空", "neutral": "➖无趋势"}
+    bias_str = f" {bias_icons.get(bias, '')}" if bias else ""
 
-    line = f"▸ {icon} {sym} {d} {a.name}{persist}{regime_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
+    line = f"▸ {icon} {sym} {d} {a.name}{persist}{bias_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
     line2 = f"    S:{s} R:{r}  |  {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
@@ -480,15 +474,6 @@ def format_consolidated_report(
             except ValueError:
                 rr_val = 0
             if rr_val < 1.2:
-                continue
-            has_trend_fail = any(c == "✗趋势" for c in a.checklist)
-            if has_trend_fail:
-                continue
-            has_rs_fail = any(c in ("✗RS弱", "✗RS强") for c in a.checklist)
-            if has_rs_fail:
-                continue
-            has_pos_fail = any(c == "✗位置" for c in a.checklist)
-            if has_pos_fail:
                 continue
             has_stale = any(c == "⚠数据陈旧" for c in a.checklist)
             if has_stale:
@@ -740,34 +725,26 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
                 check.append("⚠4H边界")
                 break
 
-    # ── 宏观趋势: 4H+1H 方向一致性 (回测: 仅 bias 一致有 edge 54.1%, 相反45.2%/中性48.5%) ──
+    # ── 宏观趋势: 4H bias (修复未来函数后: 真实 edge +1.9pp, 弱但方向正确) ──
     bias = _symbol_bias(tf_ind)
     alert.details["macro_bias"] = bias
-
-    # ── 行情状态机过滤 (回测: 强顺势60.5%/中顺势55.7%/贴均线49.4%/回调35-44%/无趋势48.7%) ──
-    from market_state import market_regime, is_tradable_regime
-    ind_4h_now = tf_ind.get("4h", {})
-    regime = market_regime(
-        bias,
-        ind_4h_now.get("close"), ind_4h_now.get("ma20"),
-        ind_4h_now.get("atr") or 1, sig_dir,
-    )
-    alert.details["market_regime"] = regime
-
-    if not is_tradable_regime(regime):
-        # 贴均线/回调/无趋势 — 回测无 edge 或负收益 (fakeout/4H边界 例外保留)
-        if alert.signal_type == "fakeout" or has_4h_boundary:
-            check.append("✓4H反转" if has_4h_boundary else "✓反趋势")
-        else:
-            check.append("✗趋势")
-            alert.confidence = min(alert.confidence * 0.65, 0.60)
+    counter = (bias == "long" and sig_dir == "short") or (bias == "short" and sig_dir == "long")
+    if bias != "neutral" and not counter:
+        check.append("✓趋势")
+    elif bias == "neutral":
+        check.append("?无趋势")
     else:
-        counter = (bias == "long" and sig_dir == "short") or (bias == "short" and sig_dir == "long")
-        if counter:
-            check.append("✗趋势")
-            alert.confidence = min(alert.confidence * 0.65, 0.60)
-        else:
-            check.append("✓趋势")
+        # bias 相反 — 修复后 49.2% 略负, 监控保留但标记 (不做硬过滤)
+        check.append("⚠逆趋势")
+
+    # ── 真实确认的毒药组合 (修复后回测 1:1 胜率, 监控标记+轻度降权) ──
+    # fakeout/long 45.1% | 1H空头+做多 46.1%
+    if alert.signal_type == "fakeout" and sig_dir == "long":
+        check.append("⚠fakeout多")
+        alert.confidence = min(alert.confidence * 0.85, 1.0)
+    if dir_1h == "bearish" and sig_dir == "long":
+        check.append("⚠逆1H抄底")
+        alert.confidence = min(alert.confidence * 0.90, 1.0)
 
     # ── S/R + SL/TP/RR ──
     ind_base = ind_1h or tf_ind.get("5m", {})
@@ -795,7 +772,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             pos_in_range = (current_price - support.price) / (resistance.price - support.price)
         if alert.direction == "long" and support:
             if pos_in_range is not None and pos_in_range >= 0.7:
-                check.append("✗位置")
+                check.append("?远S/R")
             elif pos_in_range is not None and pos_in_range <= 0.3:
                 check.append("✓近支撑")
             elif support.touch_count >= 2:
@@ -804,7 +781,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
                 check.append("?无支撑")
         elif alert.direction == "short" and resistance:
             if pos_in_range is not None and pos_in_range <= 0.3:
-                check.append("✗位置")
+                check.append("?远S/R")
             elif pos_in_range is not None and pos_in_range >= 0.7:
                 check.append("✓近阻力")
             elif resistance.touch_count >= 2:
@@ -823,11 +800,16 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     if alert.direction == "long":
         sl = sr_info["support"].price - atr_1h * atr_sl_buffer if "support" in sr_info else entry_price - atr_5m * 1.5
         tp = entry_price + atr_1h * atr_tp_mult
+        # SL 距离下限保护: 至少 0.5×1H ATR (SL太近 → RR虚高 → 实盘被噪声打掉)
+        if entry_price - sl < atr_1h * 0.5:
+            sl = entry_price - atr_1h * 0.5
         if tp <= sl or tp <= entry_price:
             tp = entry_price + atr_1h * atr_tp_mult
     elif alert.direction == "short":
         sl = sr_info["resistance"].price + atr_1h * atr_sl_buffer if "resistance" in sr_info else entry_price + atr_5m * 1.5
         tp = entry_price - atr_1h * atr_tp_mult
+        if sl - entry_price < atr_1h * 0.5:
+            sl = entry_price + atr_1h * 0.5
         if tp >= sl or tp >= entry_price:
             tp = entry_price - atr_1h * atr_tp_mult
     else:
@@ -980,15 +962,8 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
 
         alert.meta["rs"] = " ".join(parts) if parts else ""
 
-        # ── RS 方向过滤 (回测: 多头需 RS>50, 空头需 RS<-50 → 1:1胜率72%/72%, 夏普92) ──
-        rs_4h = (rs_dict.get("4h") or {}).get("score", 0)
-        rs_min = 50
-        if alert.direction == "long" and rs_4h < rs_min:
-            check.append("✗RS弱")
-            alert.confidence = min(alert.confidence * 0.65, 0.60)
-        elif alert.direction == "short" and rs_4h > -rs_min:
-            check.append("✗RS强")
-            alert.confidence = min(alert.confidence * 0.65, 0.60)
+        # ── RS 方向过滤已移除 (修复未来函数后验证无效: 各档50-52%) ──
+        # RS 保留为展示 + 轻度置信度参考 (监控视角)
 
         # 每周期独立增强: 方向与信号匹配的 TF 越多, 置信度越高
         agree_count = 0
@@ -996,13 +971,11 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             if (alert.direction == "long" and s > 0) or (alert.direction == "short" and s < 0):
                 agree_count += 1
         if agree_count >= 3:
-            alert.confidence = min(alert.confidence * 1.15, 1.0)
+            alert.confidence = min(alert.confidence * 1.05, 1.0)
             check.append("✓RS三重")
         elif agree_count >= 2:
-            alert.confidence = min(alert.confidence * 1.10, 1.0)
+            alert.confidence = min(alert.confidence * 1.03, 1.0)
             check.append("✓RS双周期")
-        elif agree_count >= 1:
-            alert.confidence = min(alert.confidence * 1.05, 1.0)
 
     # ── 量能耗尽 ──
     body_pct_5m = ind_5m.get("body_pct", 1)
@@ -1311,24 +1284,12 @@ async def async_main():
             breadth_parts = [b for b in [ms.get("breadth_1h"), ms.get("breadth_4h")] if b]
             if breadth_parts:
                 ms_line += f"\n" + " · ".join(breadth_parts)
-            # ── 当前行情状态 (BTC 视角) ──
-            from market_state import market_regime
+            # ── BTC 4H 顺势距离 (监控参考) ──
             btc_ind = all_ind.get("BTC/USDT:USDT", {})
             btc_4h = btc_ind.get("4h", {})
-            btc_1h = btc_ind.get("1h", {})
-            if btc_4h:
-                btc_bias = _symbol_bias(btc_ind)
-                btc_regime = market_regime(
-                    btc_bias,
-                    btc_4h.get("close"), btc_4h.get("ma20"),
-                    btc_4h.get("atr") or 1,
-                    "long" if btc_bias == "long" else "short" if btc_bias == "short" else "long",
-                )
-                regime_icons = {
-                    "strong_trend": "⚡强顺势", "mid_trend": "✅顺势",
-                    "at_ma": "➖贴均线", "pullback": "⛔回调", "no_trend": "⛔无趋势",
-                }
-                ms_line += f"\n行情状态: {regime_icons.get(btc_regime, btc_regime)}"
+            if btc_4h and btc_4h.get("ma20") and btc_4h.get("atr"):
+                btc_dist = (btc_4h.get("close", 0) - btc_4h.get("ma20", 0)) / (btc_4h.get("atr") or 1)
+                ms_line += f"\nBTC距4H MA20: {btc_dist:+.2f} ATR"
             ms_line += f"\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
             if btc_funding is not None:
                 crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
