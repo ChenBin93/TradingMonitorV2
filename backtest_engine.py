@@ -245,8 +245,22 @@ class TFContext:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 信号回测
+# 信号回测 — 两阶段: 检测(慢, 一次) + 模拟(快, 任意参数)
 # ═══════════════════════════════════════════════════════════════════
+
+@dataclass
+class SignalEvent:
+    """信号检测结果 — 与 SL/TP/RR 参数无关, 可缓存复用"""
+    symbol: str
+    signal: str
+    direction: str
+    ts: datetime
+    entry_price: float
+    atr_1h: float
+    atr_5m: float
+    support_price: float | None = None
+    resistance_price: float | None = None
+
 
 @dataclass
 class Trade:
@@ -263,6 +277,219 @@ class Trade:
     outcome: str = "open"  # win / loss / open
 
 
+def detect_signals(
+    all_data: dict[str, dict[str, pd.DataFrame]],
+    symbols: list[str],
+    tf_cfg: dict,
+    signal_overrides: dict | None = None,
+    dedup_minutes: int = 30,
+) -> list[SignalEvent]:
+    """阶段一: 只检测信号, 不计算 SL/TP/RR, 不 forward 判定 (与参数无关, 可缓存)"""
+    ind_params = tf_cfg.get("indicators", {})
+    ind_5m_params = ind_params.get("5m", {})
+    ind_1h_params = ind_params.get("1h", {})
+    ind_4h_params = ind_params.get("4h", {})
+
+    import signals as signals_mod
+    _orig_fsl = signals_mod.find_swing_levels
+    signals_mod.find_swing_levels = _find_swing_levels_memo
+    try:
+        events: list[SignalEvent] = []
+        last_signal_ts: dict[str, pd.Timestamp] = {}
+
+        for sym in symbols:
+            if sym not in all_data:
+                continue
+            ctx = TFContext(all_data[sym], tf_cfg, ind_5m_params, ind_1h_params, ind_4h_params)
+            if ctx.df_5m.empty:
+                continue
+
+            all_5m_ts = list(ctx.df_5m.index)
+            for i in range(30, len(all_5m_ts)):
+                ts = all_5m_ts[i]
+                ind = ctx.window_5m_ind(ts)
+                if not ind:
+                    continue
+
+                ind_1h = ctx.last_1h_ind(ts)
+                if not ind_1h:
+                    continue
+
+                regime = get_regime(ind)
+                direction = get_direction(ind)
+                state = SignalState(
+                    symbol=sym, timeframe="5m", ind=ind,
+                    regime=regime, direction=direction,
+                    params={}, ind_1h=ind_1h,
+                )
+
+                adx_val = ind.get("adx", 0) or 0
+                for sig_def in SIGNALS:
+                    if sig_def.gate == "trend" and adx_val < 25:
+                        continue
+                    if sig_def.gate == "range" and adx_val >= 20:
+                        continue
+                    params = dict(sig_def.params)
+                    if signal_overrides:
+                        # 支持定向: {"signal_id": {"param": v}} 或 全局: {"param": v}
+                        sig_ov = signal_overrides.get(sig_def.id)
+                        if isinstance(sig_ov, dict):
+                            params.update(sig_ov)
+                        else:
+                            params.update(signal_overrides)
+                    state.params = params
+                    try:
+                        result = sig_def.check(state)
+                    except Exception:
+                        continue
+                    if not result:
+                        continue
+
+                    sig_dir = result.get("direction", direction)
+                    dedup_key = f"{sym}|{sig_def.id}|{sig_dir}"
+                    last_ts = last_signal_ts.get(dedup_key)
+                    if last_ts and (ts - last_ts).total_seconds() < dedup_minutes * 60:
+                        continue
+                    last_signal_ts[dedup_key] = ts
+
+                    entry_price = ind.get("close", 0)
+                    atr_1h = ind_1h.get("atr") or ind.get("atr") or 1
+                    atr_5m = ind.get("atr") or 1
+
+                    # 记录信号时的 S/R (供模拟阶段计算 SL/TP)
+                    support_price = resistance_price = None
+                    df_1h = ind_1h.get("df")
+                    if df_1h is not None and len(df_1h) > 0 and entry_price:
+                        levels = find_swing_levels(df_1h, lookback=50)
+                        support, resistance = get_nearest_levels(levels, entry_price)
+                        if support:
+                            support_price = support.price
+                        if resistance:
+                            resistance_price = resistance.price
+
+                    events.append(SignalEvent(
+                        symbol=sym, signal=sig_def.id, direction=sig_dir,
+                        ts=ts, entry_price=entry_price,
+                        atr_1h=atr_1h, atr_5m=atr_5m,
+                        support_price=support_price, resistance_price=resistance_price,
+                    ))
+        return events
+    finally:
+        signals_mod.find_swing_levels = _orig_fsl
+
+
+def simulate_trades(
+    events: list[SignalEvent],
+    all_data: dict[str, dict[str, pd.DataFrame]],
+    symbols: list[str],
+    atr_sl_buffer: float = 0.3,
+    rr_min: float = 1.2,
+    forward_hours: float = 48,
+    tp_mode: str = "sr",
+    atr_tp_mult: float = 2.5,
+) -> list[Trade]:
+    """阶段二: 用任意 SL/TP/RR 参数模拟交易 — 快, 适合参数扫描
+
+    tp_mode: "sr" — TP=1H S/R 对侧; "atr" — TP=entry±ATR×atr_tp_mult; "min" — 取较近者
+    """
+    # 预加载 5m df 的 numpy 数组 (每 symbol 一次)
+    df_by_sym: dict[str, pd.DataFrame] = {}
+    for sym in symbols:
+        if sym in all_data:
+            df_by_sym[sym] = all_data[sym].get("5m", pd.DataFrame())
+
+    trades: list[Trade] = []
+    for ev in events:
+        df = df_by_sym.get(ev.symbol)
+        if df is None or df.empty:
+            continue
+
+        entry_price = ev.entry_price
+        if ev.direction == "long":
+            if ev.support_price:
+                sl = ev.support_price - ev.atr_1h * atr_sl_buffer
+            else:
+                sl = entry_price - ev.atr_5m * 1.5
+            tp_sr = ev.resistance_price
+            tp_atr = entry_price + ev.atr_1h * atr_tp_mult
+            if tp_mode == "atr":
+                tp = tp_atr
+            elif tp_mode == "min":
+                tp = min(tp_sr, tp_atr) if tp_sr else tp_atr
+            else:
+                tp = tp_sr if tp_sr else tp_atr
+            if tp <= sl or tp <= entry_price:
+                tp = tp_atr
+        else:
+            if ev.resistance_price:
+                sl = ev.resistance_price + ev.atr_1h * atr_sl_buffer
+            else:
+                sl = entry_price + ev.atr_5m * 1.5
+            tp_sr = ev.support_price
+            tp_atr = entry_price - ev.atr_1h * atr_tp_mult
+            if tp_mode == "atr":
+                tp = tp_atr
+            elif tp_mode == "min":
+                tp = max(tp_sr, tp_atr) if tp_sr else tp_atr
+            else:
+                tp = tp_sr if tp_sr else tp_atr
+            if tp >= sl or tp >= entry_price:
+                tp = tp_atr
+
+        sl_dist = abs(entry_price - sl)
+        tp_dist = abs(tp - entry_price)
+        rr = tp_dist / sl_dist if sl_dist > 0 else 0
+        if rr < rr_min:
+            continue
+
+        trade = Trade(
+            symbol=ev.symbol, signal=ev.signal, direction=ev.direction,
+            entry_ts=ev.ts, entry_price=entry_price, sl=sl, tp=tp, rr=rr,
+        )
+        result = resolve_forward_df(df, ev.ts, entry_price, sl, tp, forward_hours)
+        if result is None:
+            trade.outcome = "open"
+        else:
+            trade.exit_ts, trade.exit_price, trade.outcome = result
+        trades.append(trade)
+
+    return trades
+
+
+def resolve_forward_df(df: pd.DataFrame, entry_ts: pd.Timestamp, entry_price: float,
+                       sl: float, tp: float, forward_hours: float) -> tuple | None:
+    """numpy 向量化前向判定 — 用 searchsorted 定位起点, 切片后 argmax"""
+    idx = df.index
+    ts_vals = idx.values.astype("datetime64[ns]")
+    entry_dt = np.datetime64(entry_ts.to_datetime64()) if hasattr(entry_ts, "to_datetime64") else np.datetime64(entry_ts)
+    cutoff_dt = entry_dt + np.timedelta64(int(forward_hours * 3600), "s")
+
+    pos = int(np.searchsorted(ts_vals, entry_dt, side="right"))
+    end = int(np.searchsorted(ts_vals, cutoff_dt, side="left"))
+    if pos >= end or pos >= len(df):
+        return None
+
+    highs = df["high"].values[pos:end]
+    lows = df["low"].values[pos:end]
+    long_dir = tp > entry_price
+
+    if long_dir:
+        hit_tp = np.argmax(highs >= tp)
+        hit_sl = np.argmax(lows <= sl)
+    else:
+        hit_tp = np.argmax(lows <= tp)
+        hit_sl = np.argmax(highs >= sl)
+
+    tp_hit = highs[hit_tp] >= tp if long_dir else lows[hit_tp] <= tp
+    sl_hit = lows[hit_sl] <= sl if long_dir else highs[hit_sl] >= sl
+
+    if tp_hit and (not sl_hit or hit_tp < hit_sl):
+        return idx[pos + hit_tp], tp, "win"
+    if sl_hit and (not tp_hit or hit_sl < hit_tp):
+        return idx[pos + hit_sl], sl, "loss"
+    return None
+
+
 def run_backtest(
     all_data: dict[str, dict[str, pd.DataFrame]],
     symbols: list[str],
@@ -274,178 +501,13 @@ def run_backtest(
     forward_hours: float = 48,
     dedup_minutes: int = 30,
     signal_overrides: dict | None = None,
+    tp_mode: str = "sr",
+    atr_tp_mult: float = 2.5,
 ) -> list[Trade]:
-    """跑全量回测, 返回所有模拟交易
-
-    signal_overrides: {param_key: value} — 覆盖信号参数 (如 {"threshold": 3.0})
-    """
-    ind_params = tf_cfg.get("indicators", {})
-    ind_5m_params = ind_params.get("5m", {})
-    ind_1h_params = ind_params.get("1h", {})
-    ind_4h_params = ind_params.get("4h", {})
-
-    # 打补丁: signals 内部调用的 find_swing_levels → memoize 版
-    import signals as signals_mod
-    _orig_fsl = signals_mod.find_swing_levels
-    signals_mod.find_swing_levels = _find_swing_levels_memo
-    try:
-        return _run_backtest_inner(
-            all_data, symbols, tf_cfg, signal_params, atr_sl_buffer,
-            atr_tp_fallback, rr_min, forward_hours, dedup_minutes,
-            ind_5m_params, ind_1h_params, ind_4h_params, signal_overrides)
-    finally:
-        signals_mod.find_swing_levels = _orig_fsl
-
-
-def _run_backtest_inner(
-    all_data, symbols, tf_cfg, signal_params, atr_sl_buffer,
-    atr_tp_fallback, rr_min, forward_hours, dedup_minutes,
-    ind_5m_params, ind_1h_params, ind_4h_params, signal_overrides=None,
-) -> list[Trade]:
-    """run_backtest 内部实现 (find_swing_levels 已 memoize)"""
-    trades: list[Trade] = []
-    last_signal_ts: dict[str, pd.Timestamp] = {}  # dedup: symbol|signal|direction
-
-    for sym in symbols:
-        if sym not in all_data:
-            continue
-        ctx = TFContext(all_data[sym], tf_cfg, ind_5m_params, ind_1h_params, ind_4h_params)
-
-        if ctx.df_5m.empty:
-            continue
-
-        # 只遍历 5m bars, 且 5m 指标需要 ≥ 30 根才有意义
-        all_5m_ts = list(ctx.df_5m.index)
-        for i in range(30, len(all_5m_ts)):
-            ts = all_5m_ts[i]
-            ind = ctx.window_5m_ind(ts)
-            if not ind:
-                continue
-
-            ind_1h = ctx.last_1h_ind(ts)
-            ind_4h = ctx.last_4h_ind(ts)
-
-            # ind_1h 缺失时 5m MiniDf 无法支撑 S/R 信号 — 跳过 (live 中 1H 数据恒在)
-            if not ind_1h:
-                continue
-
-            regime = get_regime(ind)
-            direction = get_direction(ind)
-
-            state = SignalState(
-                symbol=sym, timeframe="5m", ind=ind,
-                regime=regime, direction=direction,
-                params=signal_params or {},
-                ind_1h=ind_1h,
-            )
-
-            # ── gate 过滤 (与 live 一致) ──
-            adx_val = ind.get("adx", 0) or 0
-            for sig_def in SIGNALS:
-                if sig_def.gate == "trend" and adx_val < 25:
-                    continue
-                if sig_def.gate == "range" and adx_val >= 20:
-                    continue
-                params = dict(sig_def.params)
-                if signal_overrides:
-                    params.update(signal_overrides)
-                state.params = params
-                try:
-                    result = sig_def.check(state)
-                except Exception:
-                    continue
-                if not result:
-                    continue
-
-                sig_dir = result.get("direction", direction)
-                dedup_key = f"{sym}|{sig_def.id}|{sig_dir}"
-                last_ts = last_signal_ts.get(dedup_key)
-                if last_ts and (ts - last_ts).total_seconds() < dedup_minutes * 60:
-                    continue
-                last_signal_ts[dedup_key] = ts
-
-                # ── 入场/止损/止盈 ──
-                entry_price = ind.get("close", 0)
-                atr_1h = ind_1h.get("atr") or ind.get("atr") or 1
-                atr_5m = ind.get("atr") or 1
-
-                sr_info = {}
-                df_1h = ind_1h.get("df")
-                if df_1h is not None and len(df_1h) > 0 and entry_price:
-                    levels = find_swing_levels(df_1h, lookback=50)
-                    support, resistance = get_nearest_levels(levels, entry_price)
-                    if support:
-                        sr_info["support"] = support
-                    if resistance:
-                        sr_info["resistance"] = resistance
-
-                if sig_dir == "long":
-                    if "support" in sr_info:
-                        sl = sr_info["support"].price - atr_1h * atr_sl_buffer
-                    else:
-                        sl = entry_price - atr_5m * 1.5
-                    if "resistance" in sr_info:
-                        tp = sr_info["resistance"].price
-                    else:
-                        tp = entry_price + atr_1h * atr_tp_fallback
-                    if tp <= sl or tp <= entry_price:
-                        tp = entry_price + atr_1h * atr_tp_fallback
-                else:
-                    if "resistance" in sr_info:
-                        sl = sr_info["resistance"].price + atr_1h * atr_sl_buffer
-                    else:
-                        sl = entry_price + atr_5m * 1.5
-                    if "support" in sr_info:
-                        tp = sr_info["support"].price
-                    else:
-                        tp = entry_price - atr_1h * atr_tp_fallback
-                    if tp >= sl or tp >= entry_price:
-                        tp = entry_price - atr_1h * atr_tp_fallback
-
-                sl_dist = abs(entry_price - sl)
-                tp_dist = abs(tp - entry_price)
-                rr = tp_dist / sl_dist if sl_dist > 0 else 0
-
-                # ── RR 过滤 (新信号才检查, 与 live 一致) ──
-                if rr < rr_min:
-                    continue
-
-                trade = Trade(
-                    symbol=sym, signal=sig_def.id, direction=sig_dir,
-                    entry_ts=ts, entry_price=entry_price, sl=sl, tp=tp, rr=rr,
-                )
-                self_ = resolve_forward(ctx, ts, entry_price, sl, tp, forward_hours)
-                if self_ is None:
-                    trade.outcome = "open"
-                else:
-                    trade.exit_ts, trade.exit_price, trade.outcome = self_
-                trades.append(trade)
-
-    return trades
-
-
-def resolve_forward(ctx: TFContext, entry_ts: pd.Timestamp, entry_price: float,
-                    sl: float, tp: float, forward_hours: float) -> tuple | None:
-    """从 entry_ts 之后逐根 5m bar 检查: 先碰 TP (win) 还是 SL (loss), 超时 open"""
-    import bisect
-    cutoff = entry_ts + timedelta(hours=forward_hours)
-    start = bisect.bisect_right(ctx._5m_index, entry_ts)
-    long_dir = tp > entry_price
-    for ts in ctx._5m_index[start:]:
-        if ts > cutoff:
-            return None
-        row = ctx.df_5m.loc[ts]
-        if long_dir:
-            if row["high"] >= tp:
-                return ts, tp, "win"
-            if row["low"] <= sl:
-                return ts, sl, "loss"
-        else:
-            if row["low"] <= tp:
-                return ts, tp, "win"
-            if row["high"] >= sl:
-                return ts, sl, "loss"
-    return None
+    """全量回测: 检测 + 模拟 (兼容旧接口)"""
+    events = detect_signals(all_data, symbols, tf_cfg, signal_overrides, dedup_minutes)
+    return simulate_trades(events, all_data, symbols, atr_sl_buffer, rr_min,
+                           forward_hours, tp_mode, atr_tp_mult)
 
 
 # ═══════════════════════════════════════════════════════════════════
