@@ -6,6 +6,7 @@ secrets.yaml
 data/*.db
 data/tune_*.json
 data/review_cards.json
+data/events_cache/
 logs/*.log
 .venv/
 docs/COACHING_*.md
