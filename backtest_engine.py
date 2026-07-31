@@ -8,6 +8,9 @@
 入场: 信号触发后按该 5m bar 收盘价入场
 出场: SL/TP 取 1H S/R + ATR 缓冲, forward-walk 检查先碰哪个
 """
+import hashlib
+import os
+import pickle
 import sqlite3
 import sys
 from dataclasses import dataclass, field
@@ -293,14 +296,73 @@ class Trade:
     outcome: str = "open"  # win / loss / open
 
 
+EVENTS_CACHE_DIR = "data/events_cache"
+
+
+def _events_cache_key(symbols: list[str], tf_cfg: dict, signal_overrides: dict | None,
+                      dedup_minutes: int) -> str:
+    """缓存 key: 由 symbols + 指标参数 + 信号覆盖 + dedup + SIGNALS 指纹决定"""
+    sig_fp = hashlib.md5(pickle.dumps([
+        (s.id, s.params, s.gate) for s in SIGNALS
+    ])).hexdigest()[:8]
+    payload = {
+        "symbols": sorted(symbols),
+        "indicators": tf_cfg.get("indicators", {}),
+        "overrides": signal_overrides or {},
+        "dedup_minutes": dedup_minutes,
+        "signals_fp": sig_fp,
+        "engine_version": 4,
+    }
+    raw = pickle.dumps(payload)
+    return hashlib.md5(raw).hexdigest()[:16]
+
+
 def detect_signals(
     all_data: dict[str, dict[str, pd.DataFrame]],
     symbols: list[str],
     tf_cfg: dict,
     signal_overrides: dict | None = None,
     dedup_minutes: int = 30,
+    use_cache: bool = True,
 ) -> list[SignalEvent]:
-    """阶段一: 只检测信号, 不计算 SL/TP/RR, 不 forward 判定 (与参数无关, 可缓存)"""
+    """阶段一: 只检测信号, 不计算 SL/TP/RR, 不 forward 判定 (与参数无关, 可缓存)
+
+    use_cache=True 时结果持久化到 data/events_cache/, 同参数二次调用直接加载
+    """
+    if not use_cache:
+        return _detect_signals_inner(all_data, symbols, tf_cfg, signal_overrides, dedup_minutes)
+
+    os.makedirs(EVENTS_CACHE_DIR, exist_ok=True)
+    key = _events_cache_key(symbols, tf_cfg, signal_overrides, dedup_minutes)
+    cache_path = os.path.join(EVENTS_CACHE_DIR, f"events_{key}.pkl")
+
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "rb") as f:
+                events = pickle.load(f)
+            print(f"[cache] loaded {len(events)} events from {cache_path}", flush=True)
+            return events
+        except Exception as e:
+            print(f"[cache] load failed: {e}, re-detecting", flush=True)
+
+    events = _detect_signals_inner(all_data, symbols, tf_cfg, signal_overrides, dedup_minutes)
+    try:
+        with open(cache_path, "wb") as f:
+            pickle.dump(events, f)
+        print(f"[cache] saved {len(events)} events → {cache_path}", flush=True)
+    except Exception as e:
+        print(f"[cache] save failed: {e}", flush=True)
+    return events
+
+
+def _detect_signals_inner(
+    all_data: dict[str, dict[str, pd.DataFrame]],
+    symbols: list[str],
+    tf_cfg: dict,
+    signal_overrides: dict | None = None,
+    dedup_minutes: int = 30,
+) -> list[SignalEvent]:
+    """detect_signals 内部实现 (无缓存)"""
     ind_params = tf_cfg.get("indicators", {})
     ind_5m_params = ind_params.get("5m", {})
     ind_1h_params = ind_params.get("1h", {})
@@ -403,10 +465,12 @@ def simulate_trades(
     forward_hours: float = 48,
     tp_mode: str = "sr",
     atr_tp_mult: float = 2.5,
+    symmetric: bool = False,
 ) -> list[Trade]:
     """阶段二: 用任意 SL/TP/RR 参数模拟交易 — 快, 适合参数扫描
 
     tp_mode: "sr" — TP=1H S/R 对侧; "atr" — TP=entry±ATR×atr_tp_mult; "min" — 取较近者
+    symmetric: True 时 SL/TP 以入场价对称按 ATR 距离, 忽略 S/R (edge 测试用)
     """
     # 预加载 5m df 的 numpy 数组 (每 symbol 一次)
     df_by_sym: dict[str, pd.DataFrame] = {}
@@ -421,7 +485,15 @@ def simulate_trades(
             continue
 
         entry_price = ev.entry_price
-        if ev.direction == "long":
+        if symmetric:
+            # 对称模式: SL/TP 以入场价为基准按 ATR 距离, 忽略 S/R (用于 edge 测试)
+            if ev.direction == "long":
+                sl = entry_price - ev.atr_1h * atr_sl_buffer
+                tp = entry_price + ev.atr_1h * atr_tp_mult
+            else:
+                sl = entry_price + ev.atr_1h * atr_sl_buffer
+                tp = entry_price - ev.atr_1h * atr_tp_mult
+        elif ev.direction == "long":
             if ev.support_price:
                 sl = ev.support_price - ev.atr_1h * atr_sl_buffer
             else:

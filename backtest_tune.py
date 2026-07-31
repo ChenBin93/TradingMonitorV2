@@ -29,7 +29,7 @@ PARAM_SWEEPS = {
 }
 
 # 模拟阶段参数 (检测一次后秒级切换)
-ENGINE_PARAMS = {"atr_sl_buffer", "rr_min", "forward_hours", "tp_mode", "atr_tp_mult"}
+ENGINE_PARAMS = {"atr_sl_buffer", "rr_min", "forward_hours", "tp_mode", "atr_tp_mult", "symmetric"}
 SIGNAL_PARAMS = set()
 
 
@@ -80,7 +80,7 @@ def run_sweep(param_name: str, values: list, cfg_path: str,
             events = local_cache["events"]
 
         kw = {"atr_sl_buffer": 0.3, "rr_min": 1.2, "forward_hours": 48,
-              "tp_mode": "sr", "atr_tp_mult": 2.5}
+              "tp_mode": "sr", "atr_tp_mult": 2.5, "symmetric": False}
         if base_overrides:
             for k, bv in base_overrides.items():
                 if k in ENGINE_PARAMS:
