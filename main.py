@@ -728,13 +728,13 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     # ── 4H 大结构边界 (提前检测, 供趋势判断参考) ──
     ind_4h = tf_ind.get("4h", {})
     current_price = (ind_1h or tf_ind.get("5m", {})).get("close") if ind_1h else None
-    atr_1h = (ind_1h or tf_ind.get("5m", {})).get("atr") or 1
+    atr_4h = ind_4h.get("atr") or 1
     has_4h_boundary = False
     df_4h = ind_4h.get("df")
     if df_4h is not None and len(df_4h) >= 20 and current_price:
         levels_4h = find_swing_levels(df_4h, lookback=50)
         for lvl in levels_4h:
-            if lvl.touch_count >= 2 and abs(current_price - lvl.price) <= atr_1h * 2.5:
+            if lvl.touch_count >= 2 and abs(current_price - lvl.price) <= atr_4h * 1.0:
                 alert.meta["4h_boundary"] = f"4H{lvl.side}{lvl.price:.5g}"
                 has_4h_boundary = True
                 check.append("⚠4H边界")
