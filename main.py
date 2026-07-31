@@ -728,10 +728,17 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
                 check.append("⚠4H边界")
                 break
 
-    # ── 宏观趋势: 4H+1H 方向一致性 ──
+    # ── 宏观趋势: 4H+1H 方向一致性 (回测: 仅 bias 一致有 edge 54.1%, 相反45.2%/中性48.5%) ──
     bias = _symbol_bias(tf_ind)
     alert.details["macro_bias"] = bias
-    if bias != "neutral":
+    if bias == "neutral":
+        # 无明确宏观趋势 — 回测显示无方向 edge, 拒绝 (fakeout/4H边界 例外保留)
+        if alert.signal_type == "fakeout" or has_4h_boundary:
+            check.append("✓反趋势" if not has_4h_boundary else "✓4H反转")
+        else:
+            check.append("✗趋势")
+            alert.confidence = min(alert.confidence * 0.65, 0.60)
+    else:
         counter = (bias == "long" and sig_dir == "short") or (bias == "short" and sig_dir == "long")
         if counter:
             if alert.signal_type == "fakeout" or has_4h_boundary:
