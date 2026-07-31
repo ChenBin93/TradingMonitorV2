@@ -1,3 +1,38 @@
+# 行情状态机 — 回测验证的 5 态 (20标的60天, 1:1 胜率)
+#   强顺势(d>=1.0) 60.5% | 中顺势(0.5-1.0) 55.7% | 贴均线(0-0.5) 49.4%
+#   浅回调(-1~0) 44.0% | 深回调(<-1) 35.1% | 无趋势 48.7%
+# 结论: 只交易 顺势距离>=0.5 (强+中顺势), 其余回避
+
+STRONG_TREND_DIST = 1.0    # 强顺势阈值
+TRADE_MIN_DIST = 0.5       # 可交易最小顺势距离 (ATR 归一化)
+
+
+def market_regime(bias: str, close_4h, ma20_4h, atr_4h, direction: str) -> str:
+    """行情状态判定 — 返回 strong_trend/mid_trend/at_ma/pullback/no_trend
+
+    bias: 宏观方向 long/short/neutral
+    direction: 信号方向 long/short
+    顺势距离 = (close_4h - ma20_4h) / atr_4h, 按信号方向对称化
+    """
+    if bias == "neutral" or not close_4h or not ma20_4h or not atr_4h or atr_4h <= 0:
+        return "no_trend"
+    dist = (close_4h - ma20_4h) / atr_4h
+    align_dist = dist if direction == "long" else -dist
+
+    if align_dist >= STRONG_TREND_DIST:
+        return "strong_trend"
+    if align_dist >= TRADE_MIN_DIST:
+        return "mid_trend"
+    if align_dist >= 0:
+        return "at_ma"
+    return "pullback"
+
+
+def is_tradable_regime(regime: str) -> bool:
+    """该行情状态是否可交易 (回测: 只有强+中顺势有正 edge)"""
+    return regime in ("strong_trend", "mid_trend")
+
+
 def _empty_state(desc: str) -> dict:
     return {
         "bias": "neutral", "confidence": 0, "desc": desc, "btc_price": None,

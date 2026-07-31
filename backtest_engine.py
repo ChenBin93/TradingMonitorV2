@@ -284,6 +284,7 @@ class SignalEvent:
     adx_1h: float = 0.0             # 1H ADX
     ma_4h: str = "neutral"          # 4H MA 排列
     adx_4h: float = 0.0             # 4H ADX
+    atr_4h: float = 0.0             # 4H ATR (行情状态机用)
     close_4h: float | None = None   # 4H 收盘 (宏观 bias 用)
     ma20_4h: float | None = None
     ma60_4h: float | None = None
@@ -355,7 +356,7 @@ def _events_cache_key(symbols: list[str], tf_cfg: dict, signal_overrides: dict |
         "overrides": signal_overrides or {},
         "dedup_minutes": dedup_minutes,
         "signals_fp": sig_fp,
-        "engine_version": 6,
+        "engine_version": 7,
     }
     raw = pickle.dumps(payload)
     return hashlib.md5(raw).hexdigest()[:16]
@@ -504,6 +505,7 @@ def _detect_signals_inner(
                         adx_1h=ind_1h.get("adx", 0) or 0,
                         ma_4h=ind_4h.get("ma_alignment", "neutral"),
                         adx_4h=ind_4h.get("adx", 0) or 0,
+                        atr_4h=ind_4h.get("atr", 0) or 0,
                         close_4h=ind_4h.get("close"),
                         ma20_4h=ind_4h.get("ma20"),
                         ma60_4h=ind_4h.get("ma60"),
