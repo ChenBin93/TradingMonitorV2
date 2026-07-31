@@ -484,6 +484,9 @@ def format_consolidated_report(
             has_trend_fail = any(c == "✗趋势" for c in a.checklist)
             if has_trend_fail:
                 continue
+            has_rs_fail = any(c in ("✗RS弱", "✗RS强") for c in a.checklist)
+            if has_rs_fail:
+                continue
             has_pos_fail = any(c == "✗位置" for c in a.checklist)
             if has_pos_fail:
                 continue
@@ -976,6 +979,16 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             marks.append(score)
 
         alert.meta["rs"] = " ".join(parts) if parts else ""
+
+        # ── RS 方向过滤 (回测: 多头需 RS>30, 空头需 RS<-30, 顺势内胜率45%+/夏普80+) ──
+        rs_4h = (rs_dict.get("4h") or {}).get("score", 0)
+        rs_min = 30
+        if alert.direction == "long" and rs_4h < rs_min:
+            check.append("✗RS弱")
+            alert.confidence = min(alert.confidence * 0.65, 0.60)
+        elif alert.direction == "short" and rs_4h > -rs_min:
+            check.append("✗RS强")
+            alert.confidence = min(alert.confidence * 0.65, 0.60)
 
         # 每周期独立增强: 方向与信号匹配的 TF 越多, 置信度越高
         agree_count = 0
