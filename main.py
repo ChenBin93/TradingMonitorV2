@@ -470,9 +470,6 @@ def format_consolidated_report(
                 rr_val = 0
             if rr_val < 1.2:
                 continue
-            has_dir_fail = any(c == "✗方向" for c in a.checklist)
-            if has_dir_fail:
-                continue
             has_trend_fail = any(c == "✗趋势" for c in a.checklist)
             if has_trend_fail:
                 continue
@@ -625,11 +622,12 @@ def do_scan(
             direction = get_direction(ind)
             regime = get_regime(ind)
             ind_1h = tf_ind.get("1h", {})
+            ind_4h = tf_ind.get("4h", {})
             state = SignalState(
                 symbol=sym, timeframe=tf, ind=ind,
                 regime=regime, direction=direction,
                 rs_scores=rs_scores_all.get(sym, {}),
-                ind_1h=ind_1h,
+                ind_1h=ind_1h, ind_4h=ind_4h,
             )
 
             for sig_def in SIGNALS:
@@ -703,13 +701,13 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         alert.meta["stale_data"] = True
         check.append("⚠数据陈旧")
 
-    # ── 1H 方向确认 ──
+    # ── 1H 方向确认 (回测: 1H 方向在 4H bias 下无增量, 仅作展示不过滤) ──
     sig_dir = alert.direction
     if dir_1h in ("bullish", "bearish"):
         if (dir_1h == "bullish" and sig_dir == "long") or (dir_1h == "bearish" and sig_dir == "short"):
             check.append("✓方向")
         else:
-            check.append("✗方向")
+            check.append("?方向(1H逆)")
     else:
         check.append("?方向")
 
@@ -891,21 +889,6 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
                         alert.details["vp_upgrade"] = True
         except Exception:
             pass
-
-    # ── 1H 逆方向降级 ──
-    if "✗方向" in check and dir_1h in ("bullish", "bearish"):
-        has_strong_def = False
-        if alert.direction == "long" and "support" in sr_info:
-            sup_touches = sr_info["support"].touch_count
-            vp_sup = alert.meta.get("vp_support")
-            has_strong_def = sup_touches >= 3 or (sup_touches >= 2 and vp_sup)
-        elif alert.direction == "short" and "resistance" in sr_info:
-            res_touches = sr_info["resistance"].touch_count
-            vp_res = alert.meta.get("vp_resistance")
-            has_strong_def = res_touches >= 3 or (res_touches >= 2 and vp_res)
-        if has_strong_def:
-            check.remove("✗方向")
-            check.append("⚠逆1H")
 
     # ── 仓位参考: 1×1H ATR 标准距离, 1%本金风险 ──
     try:
@@ -1348,7 +1331,7 @@ async def async_main():
                     symbol=sym, timeframe="5m", ind=ind_5m,
                     regime=get_regime(ind_5m), direction=get_direction(ind_5m),
                     rs_scores=rs_scores_all.get(sym, {}),
-                    ind_1h=tf_ind.get("1h", {}),
+                    ind_1h=tf_ind.get("1h", {}), ind_4h=tf_ind.get("4h", {}),
                 )
                 ws = check_warnings(state)
                 if ws:

@@ -343,9 +343,11 @@ EVENTS_CACHE_DIR = "data/events_cache"
 
 def _events_cache_key(symbols: list[str], tf_cfg: dict, signal_overrides: dict | None,
                       dedup_minutes: int) -> str:
-    """缓存 key: 由 symbols + 指标参数 + 信号覆盖 + dedup + SIGNALS 指纹决定"""
+    """缓存 key: symbols + 指标参数 + 信号覆盖 + dedup + SIGNALS 指纹(含实现源码)"""
+    import inspect
     sig_fp = hashlib.md5(pickle.dumps([
-        (s.id, s.params, s.gate) for s in SIGNALS
+        (s.id, s.params, s.gate, inspect.getsource(s.check))
+        for s in SIGNALS
     ])).hexdigest()[:8]
     payload = {
         "symbols": sorted(symbols),
@@ -353,7 +355,7 @@ def _events_cache_key(symbols: list[str], tf_cfg: dict, signal_overrides: dict |
         "overrides": signal_overrides or {},
         "dedup_minutes": dedup_minutes,
         "signals_fp": sig_fp,
-        "engine_version": 5,
+        "engine_version": 6,
     }
     raw = pickle.dumps(payload)
     return hashlib.md5(raw).hexdigest()[:16]
@@ -441,7 +443,7 @@ def _detect_signals_inner(
                 state = SignalState(
                     symbol=sym, timeframe="5m", ind=ind,
                     regime=regime, direction=direction,
-                    params={}, ind_1h=ind_1h,
+                    params={}, ind_1h=ind_1h, ind_4h=ind_4h,
                 )
 
                 adx_val = ind.get("adx", 0) or 0

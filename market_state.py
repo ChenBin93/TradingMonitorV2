@@ -111,62 +111,59 @@ def compute_market_state(tf_ind: dict) -> dict:
         except Exception:
             pass
 
-    # ── 方向判定: 1H 定方向, 4H 调置信度 ──
+    # ── 方向判定: 4H 定方向 (回测: 4H bias 是唯一方向 edge), 1H 仅展示 ──
     bias = "neutral"
     conf = 0
     bias_reason = ""
     dir_1h_label = "1H中性"
     dir_4h_label = ""
 
-    if ma_align_1h == "bullish" and adx_1h >= 20:
-        bias = "long"
-        conf = min(50 + adx_1h * 0.5, 75)
+    # 1H 标签 (仅展示)
+    if ma_align_1h == "bullish":
         dir_1h_label = f"1H多头(ADX{adx_1h:.0f})"
-    elif ma_align_1h == "bearish" and adx_1h >= 20:
-        bias = "short"
-        conf = min(50 + adx_1h * 0.5, 75)
+    elif ma_align_1h == "bearish":
         dir_1h_label = f"1H空头(ADX{adx_1h:.0f})"
     elif adx_1h < 15:
-        bias = "neutral"
-        conf = 0
         dir_1h_label = f"1H震荡(ADX{adx_1h:.0f})"
-        bias_reason = f"1H震荡 ADX={adx_1h:.0f}"
     else:
-        bias = "neutral"
-        conf = 0
         dir_1h_label = f"1H中性(ADX{adx_1h:.0f})"
-        bias_reason = f"1H中性 ADX={adx_1h:.0f}"
 
-    # 4H 标签
+    # 4H 定方向 (与 _symbol_bias/_macro_bias 同款: 4H MA20/MA60+ADX 稳定趋势)
     if adx_4h >= 20 and ma_align_4h == "bullish":
+        bias = "long"
+        conf = min(50 + adx_4h * 0.5, 75)
         dir_4h_label = f"4H多头(ADX{adx_4h:.0f})"
     elif adx_4h >= 20 and ma_align_4h == "bearish":
+        bias = "short"
+        conf = min(50 + adx_4h * 0.5, 75)
         dir_4h_label = f"4H空头(ADX{adx_4h:.0f})"
     elif above_ma20_4h and above_ma60_4h:
+        bias = "long"
+        conf = 45
         dir_4h_label = f"4H偏多(ADX{adx_4h:.0f})"
     elif not above_ma20_4h and not above_ma60_4h:
+        bias = "short"
+        conf = 45
         dir_4h_label = f"4H偏空(ADX{adx_4h:.0f})"
     else:
+        bias = "neutral"
+        conf = 0
         dir_4h_label = f"4H中性(ADX{adx_4h:.0f})"
 
-    # 4H 校验
-    bias_4h = ""
+    # 1H 动量确认: 与 4H 同向时提置信度, 反向时降级 (仅影响置信度, 不改变方向)
     if bias != "neutral":
-        align = (bias == "long" and ma_align_4h == "bullish") or (bias == "short" and ma_align_4h == "bearish")
-        oppose = (bias == "long" and ma_align_4h == "bearish") or (bias == "short" and ma_align_4h == "bullish")
-        if align and adx_4h >= 20:
-            conf = min(conf + 15, 85)
-            bias_4h = "✓4H"
-        elif oppose and adx_4h >= 20:
-            conf = max(conf - 20, 30)
-            bias_4h = "⚠逆4H"
-        elif align:
-            bias_4h = "趋4H"  # weak alignment
-
-    if not bias_reason:
-        bias_reason = f"{dir_1h_label}"
-    if bias_4h:
-        bias_reason += f" {bias_4h}"
+        h1_align = (bias == "long" and ma_align_1h == "bullish") or (bias == "short" and ma_align_1h == "bearish")
+        h1_oppose = (bias == "long" and ma_align_1h == "bearish") or (bias == "short" and ma_align_1h == "bullish")
+        if h1_align and adx_1h >= 20:
+            conf = min(conf + 10, 80)
+            bias_reason = f"{dir_4h_label} ✓1H同向"
+        elif h1_oppose and adx_1h >= 20:
+            conf = max(conf - 10, 30)
+            bias_reason = f"{dir_4h_label} ⚠1H反向"
+        else:
+            bias_reason = f"{dir_4h_label}"
+    else:
+        bias_reason = dir_4h_label
 
     # ── 1H 多空分布 ──
     bull_1h = sum(

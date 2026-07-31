@@ -16,6 +16,7 @@ class SignalState:
     params: dict = field(default_factory=dict)
     rs_scores: dict[str, dict] = field(default_factory=dict)
     ind_1h: dict = field(default_factory=dict)
+    ind_4h: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -301,9 +302,26 @@ def _check_trend_pullback(state: SignalState) -> dict | None:
     if not ind_1h:
         return None
 
-    ma_1h = ind_1h.get("ma_alignment", "neutral")
-    adx_1h = ind_1h.get("adx", 0) or 0
-    if adx_1h < 20:
+    # 方向: 4H 宏观 bias 定 (回测: 4H bias 是唯一方向 edge)
+    ind_4h = state.ind_4h
+    ma_4h = ind_4h.get("ma_alignment", "neutral")
+    adx_4h = ind_4h.get("adx", 0) or 0
+    close_4h = ind_4h.get("close")
+    ma20_4h = ind_4h.get("ma20")
+    ma60_4h = ind_4h.get("ma60")
+    above_ma20 = ma20_4h and close_4h and close_4h > ma20_4h
+    above_ma60 = ma60_4h and close_4h and close_4h > ma60_4h
+    if adx_4h >= 20 and ma_4h == "bullish":
+        bias_dir = "long"
+    elif adx_4h >= 20 and ma_4h == "bearish":
+        bias_dir = "short"
+    elif above_ma20 and above_ma60 and adx_4h >= 18:
+        bias_dir = "long"
+    elif not above_ma20 and not above_ma60 and adx_4h >= 18:
+        bias_dir = "short"
+    else:
+        bias_dir = "neutral"
+    if bias_dir == "neutral":
         return None
 
     df_1h = ind_1h.get("df")
@@ -355,19 +373,19 @@ def _check_trend_pullback(state: SignalState) -> dict | None:
     for lvl in levels:
         if lvl.touch_count < 2:
             continue
-        if ma_1h == "bullish" and lvl.side == "support":
+        if bias_dir == "long" and lvl.side == "support":
             r = _try_fire(True, lvl.price, f"趋势回调多 1H支撑{lvl.price:.5g}({lvl.touch_count}触)", 0.78 if pinbar == "bullish" else 0.70)
             if r: return r
-        elif ma_1h == "bearish" and lvl.side == "resistance":
+        elif bias_dir == "short" and lvl.side == "resistance":
             r = _try_fire(False, lvl.price, f"趋势回调空 1H阻力{lvl.price:.5g}({lvl.touch_count}触)", 0.78 if pinbar == "bearish" else 0.70)
             if r: return r
 
     # ── 1H MA20 支撑/阻力 (无极点时替代) ──
     if ma20_1h and close_5m:
-        if ma_1h == "bullish" and close_5m > ma20_1h:
+        if bias_dir == "long" and close_5m > ma20_1h:
             r = _try_fire(True, ma20_1h, f"趋势回调多 MA20{ma20_1h:.5g}", 0.65)
             if r: return r
-        elif ma_1h == "bearish" and close_5m < ma20_1h:
+        elif bias_dir == "short" and close_5m < ma20_1h:
             r = _try_fire(False, ma20_1h, f"趋势回调空 MA20{ma20_1h:.5g}", 0.65)
             if r: return r
 
@@ -376,10 +394,10 @@ def _check_trend_pullback(state: SignalState) -> dict | None:
     if ma20_1h and bbw_1h and close_5m and bbw_1h > 0:
         bb_lower = ma20_1h * (1 - bbw_1h / 200)
         bb_upper = ma20_1h * (1 + bbw_1h / 200)
-        if ma_1h == "bullish" and close_5m > bb_lower:
+        if bias_dir == "long" and close_5m > bb_lower:
             r = _try_fire(True, bb_lower, f"趋势回调多 BB下轨{bb_lower:.5g}", 0.60)
             if r: return r
-        elif ma_1h == "bearish" and close_5m < bb_upper:
+        elif bias_dir == "short" and close_5m < bb_upper:
             r = _try_fire(False, bb_upper, f"趋势回调空 BB上轨{bb_upper:.5g}", 0.60)
             if r: return r
 
