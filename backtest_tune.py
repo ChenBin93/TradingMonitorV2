@@ -20,12 +20,6 @@ from backtest_engine import load_all, detect_signals, simulate_trades, summarize
 
 # 单参数扫描定义: 参数路径 → 候选值
 PARAM_SWEEPS = {
-    # signals.py SignalDef 参数 (影响检测阶段 — 会触发重新检测)
-    # 格式: ("signals", "信号id", "参数key", [候选值])
-    "volume_threshold":     ("signals", "volume_spike", "threshold", [2.5, 3.0, 3.5]),
-    "vol_min_atr_ratio":    ("signals", "volume_spike", "min_price_change", [0.2, 0.3, 0.5]),
-    "rsi_oversold":         ("signals", "rsi_extreme", "oversold", [20, 25, 30]),
-    "rsi_overbought":       ("signals", "rsi_extreme", "overbot", [70, 75, 80]),
     # 模拟阶段参数 (检测一次后秒级切换)
     "atr_sl_buffer":        ("engine", "atr_sl_buffer", None, [0.1, 0.2, 0.3, 0.5]),
     "rr_min":               ("engine", "rr_min", None, [1.0, 1.2, 1.5, 2.0]),
@@ -36,7 +30,7 @@ PARAM_SWEEPS = {
 
 # 模拟阶段参数 (检测一次后秒级切换)
 ENGINE_PARAMS = {"atr_sl_buffer", "rr_min", "forward_hours", "tp_mode", "atr_tp_mult"}
-SIGNAL_PARAMS = {"volume_threshold", "vol_min_atr_ratio", "rsi_oversold", "rsi_overbought"}
+SIGNAL_PARAMS = set()
 
 
 def run_sweep(param_name: str, values: list, cfg_path: str,

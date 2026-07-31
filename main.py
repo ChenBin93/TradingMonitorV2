@@ -94,7 +94,6 @@ class Alert:
     def tag(self) -> str:
         tags = {
             "breakout": "突破", "fakeout": "假破", "retest": "回踩",
-            "rsi_extreme": "RSI", "volume_spike": "VOL",
             "trend_pullback": "回调",
         }
         return tags.get(self.signal_type, self.signal_type[:4])
@@ -103,7 +102,6 @@ class Alert:
     def name(self) -> str:
         names = {
             "breakout": "防线突破", "fakeout": "假突破反转", "retest": "回踩确认",
-            "rsi_extreme": "RSI极值", "volume_spike": "放量异动",
             "trend_pullback": "趋势回调",
         }
         return names.get(self.signal_type, self.signal_type)
@@ -137,12 +135,6 @@ class AlertFilter:
             if vr >= 5: conf += 0.10
         elif a.signal_type == "fakeout":
             if d.get("touch_count", 0) >= 3: conf += 0.08
-        elif a.signal_type == "rsi_extreme":
-            rsi = ind.get("rsi", 50)
-            if rsi <= 20 or rsi >= 80: conf += 0.08
-        elif a.signal_type == "volume_spike":
-            vr = d.get("volume_ratio", 1)
-            if vr >= 5: conf += 0.10
 
         return min(conf, 1.0)
 
@@ -192,10 +184,6 @@ def rank_symbols(alerts: list[Alert], all_ind: dict[str, dict[str, dict]]) -> li
         })
         s["tags"].append(a.tag)
         s["conf"] = max(s["conf"], a.confidence)
-
-        if a.signal_type == "volume_spike":
-            vr = a.details.get("volume_ratio", 1)
-            s["volume"] = max(s["volume"], min(vr / 3, 1))
 
         tf_data = all_ind.get(a.symbol, {})
         ind_1h = tf_data.get("1h", {})
@@ -298,13 +286,13 @@ def _is_us_market_hours() -> bool:
 # ═══════════════════════════════════════════════════════════════════════
 
 ENTRY_WINDOWS: dict[str, int] = {
-    "volume_spike": 15, "breakout": 30, "fakeout": 30,
-    "retest": 60, "trend_pullback": 60, "rsi_extreme": 90,
+    "breakout": 30, "fakeout": 30,
+    "retest": 60, "trend_pullback": 60,
 }
 
 POSITION_LIMITS: dict[str, int] = {
-    "volume_spike": 60, "fakeout": 120, "breakout": 180,
-    "retest": 180, "trend_pullback": 360, "rsi_extreme": 480,
+    "fakeout": 120, "breakout": 180,
+    "retest": 180, "trend_pullback": 360,
 }
 
 DEFAULT_ENTRY = 30
@@ -799,20 +787,6 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         else:
             check.append("?边界")
 
-    # ── RSI 极值位置收紧: 必须靠近 1H S/R 才有效 ──
-    if alert.signal_type == "rsi_extreme":
-        dist_to_sr = None
-        if alert.direction == "long" and "support" in sr_info:
-            dist_to_sr = (current_price - sr_info["support"].price) / atr_1h if atr_1h > 0 else None
-            if dist_to_sr is not None and dist_to_sr > 1.0:
-                check.append("✗位置")
-        elif alert.direction == "short" and "resistance" in sr_info:
-            dist_to_sr = (sr_info["resistance"].price - current_price) / atr_1h if atr_1h > 0 else None
-            if dist_to_sr is not None and dist_to_sr > 1.0:
-                check.append("✗位置")
-        else:
-            check.append("✗位置")
-
     # ── SL/TP/RR (回测调优: SL缓冲0.1, TP=2×1H ATR) ──
     entry_price = current_price or ind_base.get("close") or 0
     sl = tp = 0
@@ -1078,14 +1052,6 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     adx_1h_val = (ind_1h or {}).get("adx", 0) or 0
     if adx_5m_val < 18 and adx_1h_val < 18:
         check.append("📦震荡")
-
-    # ── 4H边界 RSI反转 ──
-    if has_4h_boundary and alert.signal_type == "rsi_extreme":
-        bias_val = alert.details.get("macro_bias", "neutral")
-        if bias_val != "neutral":
-            counter = (bias_val == "long" and alert.direction == "short") or (bias_val == "short" and alert.direction == "long")
-            if counter:
-                check.append("✓4H反转")
 
     # ── BB 带区域 ──
     ma20_1h = (ind_1h or {}).get("ma20")

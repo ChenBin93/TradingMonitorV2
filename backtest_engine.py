@@ -80,7 +80,7 @@ def load_all(db_path: str = "data/backtest.db") -> dict[str, dict[str, pd.DataFr
 # ═══════════════════════════════════════════════════════════════════
 
 class MiniSeries:
-    """轻量 Series 替代: .iloc[idx] 直接索引 numpy 数组"""
+    """轻量 Series 替代: .iloc[idx] 直接索引 numpy 数组 (支持负索引)"""
     __slots__ = ("_arr",)
 
     def __init__(self, arr):
@@ -90,6 +90,10 @@ class MiniSeries:
     def iloc(self):
         return self
 
+    @property
+    def values(self):
+        return self._arr
+
     def __getitem__(self, idx):
         return self._arr[idx]
 
@@ -98,7 +102,7 @@ class MiniSeries:
 
 
 class MiniDf:
-    """轻量 DataFrame 替代: 只支持信号用到的 open/high/low/close 列访问"""
+    """轻量 DataFrame 替代: 支持信号用到的 open/high/low/close 列访问 + tail()"""
     __slots__ = ("_cols", "_n")
 
     def __init__(self, df: pd.DataFrame, pos: int):
@@ -116,6 +120,18 @@ class MiniDf:
 
     def __getitem__(self, col: str) -> MiniSeries:
         return MiniSeries(self._cols[col])
+
+    def tail(self, n: int) -> "MiniDf":
+        """返回最近 n 根的视图 (截断到当前已收盘范围)"""
+        start = max(0, self._n - n)
+        new = MiniDf.__new__(MiniDf)
+        new._n = self._n
+        new._cols = {k: v[start:self._n] for k, v in self._cols.items()}
+        return new
+
+    def reset_index(self, drop: bool = True) -> "MiniDf":
+        """与 pandas API 兼容 — 数据本就按序存储"""
+        return self
 
 
 def _row_to_light(series: pd.DataFrame, pos: int, df: pd.DataFrame,

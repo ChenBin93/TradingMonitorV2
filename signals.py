@@ -482,7 +482,7 @@ def _brew_trend_pb(state: SignalState) -> dict | None:
     return None
 
 
-BREWERS = [_brew_breakout, _brew_rsi, _brew_volume, _brew_trend_pb]
+BREWERS = [_brew_breakout, _brew_trend_pb]
 
 
 def check_brewing(state: SignalState) -> list[dict]:
@@ -505,8 +505,6 @@ SIGNALS: list[SignalDef] = [
     SignalDef("breakout",        "防线突破",   _check_breakout,        {},                    "突破", "trend"),
     SignalDef("fakeout",         "假突破反转", _check_fakeout,         {},                    "假破", "any"),
     SignalDef("retest",          "回踩确认",   _check_retest,          {},                    "回踩", "any"),
-    SignalDef("rsi_extreme",     "RSI极值",    _check_rsi_extreme,     {"oversold": 25, "overbot": 75}, "RSI", "any"),
-    SignalDef("volume_spike",    "放量异动",   _check_volume_spike,    {"threshold": 3.0, "min_price_change": 0.3}, "VOL", "any"),
     SignalDef("trend_pullback",  "趋势回调",   _check_trend_pullback,  {},                    "回调", "trend"),
 ]
 
