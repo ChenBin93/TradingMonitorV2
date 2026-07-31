@@ -1314,6 +1314,8 @@ async def async_main():
                 ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()} ━━━\n"
                 ms_line += f"{ms['desc']}\n"
                 ms_line += f"{ms['h1_line']}"
+                if ms.get("ma20_line"):
+                    ms_line += f"\n距MA20: {ms['ma20_line']}"
                 if ms.get("sr"):
                     ms_line += f"\n{ms['sr']}"
                 if ms.get("breadth"):

@@ -16,20 +16,35 @@ def compute_market_state(tf_ind: dict) -> dict:
     if not ind_1h:
         return {"bias": "neutral", "confidence": 0, "desc": "数据不足", "btc_price": None}
 
-    # ── BTC 现价 ──
-    btc_price = ind_1h.get("close")
+    # ── BTC 现价 (5m close 为实时价格) ──
+    btc_price = (ind_5m or ind_1h).get("close")
     btc_atr_1h = ind_1h.get("atr") or 1
     btc_change_1h = ind_1h.get("roc", 0) or 0
+
+    def _pullback(price, ma):
+        if not price or not ma or ma <= 0:
+            return None
+        return (price - ma) / ma * 100
+
+    # ── 各周期 MA20 距离 ──
+    ma20_5m = ind_5m.get("ma20") if ind_5m else None
+    ma20_1h = ind_1h.get("ma20")
+    ma20_4h = (ind_4h or {}).get("ma20")
+    pb_5m = _pullback(btc_price, ma20_5m)
+    pb_1h = _pullback(btc_price, ma20_1h)
+    pb_4h = _pullback(btc_price, ma20_4h)
+
+    ma20_parts = []
+    for label, val in [("5m", pb_5m), ("1H", pb_1h), ("4H", pb_4h)]:
+        if val is not None:
+            ma20_parts.append(f"{label}{val:+.1f}%")
+    ma20_line = " · ".join(ma20_parts) if ma20_parts else ""
 
     # ── 1H 指标 ──
     adx_1h = ind_1h.get("adx", 0) or 0
     ma_align_1h = ind_1h.get("ma_alignment", "neutral")
     bb_state_1h = ind_1h.get("bb_state", "unknown")
     vr_1h = ind_1h.get("volume_ratio") or 1
-    ma20_1h = ind_1h.get("ma20")
-    pullback_pct = 0
-    if ma20_1h and btc_price and ma20_1h > 0:
-        pullback_pct = (btc_price - ma20_1h) / ma20_1h * 100
 
     # ── 4H 趋势 ──
     adx_4h = (ind_4h or {}).get("adx", 0) or 0
@@ -121,11 +136,11 @@ def compute_market_state(tf_ind: dict) -> dict:
 
     # 1H 行
     h1_type = "多头" if ma_align_1h == "bullish" else "空头" if ma_align_1h == "bearish" else "中性"
-    h1_line = f"1H{h1_type}(ADX{adx_1h:.0f}) | 距MA20:{pullback_pct:+.1f}%"
+    h1_line = f"1H{h1_type}(ADX{adx_1h:.0f})"
     if bb_state_1h == "contracting":
-        h1_line += " | 收缩"
+        h1_line += " | BB收缩"
     elif bb_state_1h == "expanding":
-        h1_line += " | 扩张"
+        h1_line += " | BB扩张"
     if vr_1h >= 1.5:
         h1_line += " | 放量"
 
@@ -134,6 +149,7 @@ def compute_market_state(tf_ind: dict) -> dict:
         "confidence": round(conf),
         "desc": " | ".join(desc_parts),
         "h1_line": h1_line,
+        "ma20_line": ma20_line,
         "reason": bias_reason,
         "sr": sr_str,
         "breadth": breadth_str,
@@ -143,6 +159,5 @@ def compute_market_state(tf_ind: dict) -> dict:
         "adx_4h": round(adx_4h, 1),
         "bb_state_1h": bb_state_1h,
         "ma_1h": ma_align_1h,
-        "pullback_pct": round(pullback_pct, 1),
         "atr_1h": round(btc_atr_1h, 1),
     }
