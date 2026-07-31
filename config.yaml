@@ -38,9 +38,9 @@ indicators:
     ma_long: 60
 rs:
   momentum_windows:
-    5m:  [3, 5, 10]
-    1h:  [3, 8, 12]
-    4h:  [3, 8, 12]
+    5m:  [1, 2, 3]
+    1h:  [1, 2, 3]
+    4h:  [1, 2, 3]
   weight_mode: decay
 history:
   lookback_days:
