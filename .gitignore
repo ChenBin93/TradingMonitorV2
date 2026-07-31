@@ -4,6 +4,8 @@ __pycache__/
 .env
 secrets.yaml
 data/*.db
+data/tune_*.json
+data/review_cards.json
 logs/*.log
 .venv/
 docs/COACHING_*.md
