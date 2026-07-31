@@ -1,3 +1,13 @@
+def _empty_state(desc: str) -> dict:
+    return {
+        "bias": "neutral", "confidence": 0, "desc": desc, "btc_price": None,
+        "h1_line": "", "ma20_line": "", "reason": "", "sr_1h": "", "sr_4h": "",
+        "breadth_1h": "", "breadth_4h": "", "btc_change_1h": None,
+        "adx_1h": 0, "adx_4h": 0, "bb_state_1h": "unknown",
+        "ma_1h": "neutral", "ma_4h": "neutral", "atr_1h": 0,
+    }
+
+
 def compute_market_state(tf_ind: dict) -> dict:
     """从全量指标池生成市场状态报告, 聚焦 BTC 做风向标"""
     from support_resistance import find_swing_levels, get_nearest_levels
@@ -6,7 +16,7 @@ def compute_market_state(tf_ind: dict) -> dict:
     btc_key = "BTC/USDT:USDT"
     sym = btc_key if btc_key in tf_ind else next(iter(tf_ind.keys()), None)
     if not sym:
-        return {"bias": "neutral", "confidence": 0, "desc": "无数据", "btc_price": None}
+        return _empty_state("无数据")
 
     ind_data = tf_ind.get(sym, {})
     ind_4h = ind_data.get("4h", {})
@@ -14,7 +24,7 @@ def compute_market_state(tf_ind: dict) -> dict:
     ind_5m = ind_data.get("5m", {})
 
     if not ind_1h:
-        return {"bias": "neutral", "confidence": 0, "desc": "数据不足", "btc_price": None}
+        return _empty_state("数据不足")
 
     # ── BTC 现价 (5m close 为实时价格) ──
     btc_price = (ind_5m or ind_1h).get("close")

@@ -1306,31 +1306,32 @@ async def async_main():
 
             ranks = rank_symbols(alerts, all_ind) if active else []
 
+            # ── 市场状态 (无论有无信号都推) ──
+            ms = compute_market_state(all_ind)
+            bias_icon = "🔺" if ms["bias"] == "long" else "🔻" if ms["bias"] == "short" else "⏸"
+            bias_text = "做多" if ms["bias"] == "long" else "做空" if ms["bias"] == "short" else "观望"
+
+            ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()} ━━━\n"
+            ms_line += f"{ms['desc']}\n"
+            ms_line += f"{ms['h1_line']}"
+            if ms.get("ma20_line"):
+                ms_line += f"\n距MA20: {ms['ma20_line']}"
+            if ms.get("sr_1h"):
+                ms_line += f"\n1H {ms['sr_1h']}"
+            if ms.get("sr_4h"):
+                ms_line += f"\n4H {ms['sr_4h']}"
+            breadth_parts = [b for b in [ms.get("breadth_1h"), ms.get("breadth_4h")] if b]
+            if breadth_parts:
+                ms_line += f"\n" + " · ".join(breadth_parts)
+            ms_line += f"\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
+            if btc_funding is not None:
+                crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
+                ms_line += f" · 费率:{btc_funding:+.3f}%{crowd}"
+            if rs_dispersion > 5:
+                ms_line += f" · RS分化:σ={rs_dispersion:.0f}"
+            feishu.send(ms_line)
+
             if active:
-                ms = compute_market_state(all_ind)
-                bias_icon = "🔺" if ms["bias"] == "long" else "🔻" if ms["bias"] == "short" else "⏸"
-                bias_text = "做多" if ms["bias"] == "long" else "做空" if ms["bias"] == "short" else "观望"
-
-                ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()} ━━━\n"
-                ms_line += f"{ms['desc']}\n"
-                ms_line += f"{ms['h1_line']}"
-                if ms.get("ma20_line"):
-                    ms_line += f"\n距MA20: {ms['ma20_line']}"
-                if ms.get("sr_1h"):
-                    ms_line += f"\n1H {ms['sr_1h']}"
-                if ms.get("sr_4h"):
-                    ms_line += f"\n4H {ms['sr_4h']}"
-                breadth_parts = [b for b in [ms.get("breadth_1h"), ms.get("breadth_4h")] if b]
-                if breadth_parts:
-                    ms_line += f"\n" + " · ".join(breadth_parts)
-                ms_line += f"\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
-                if btc_funding is not None:
-                    crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
-                    ms_line += f" · 费率:{btc_funding:+.3f}%{crowd}"
-                if rs_dispersion > 5:
-                    ms_line += f" · RS分化:σ={rs_dispersion:.0f}"
-                feishu.send(ms_line)
-
                 buckets: dict[str, list[Alert]] = {}
                 for a in active:
                     cat = _symbol_category(a.symbol)
