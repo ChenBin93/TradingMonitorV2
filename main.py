@@ -813,20 +813,22 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         else:
             check.append("✗位置")
 
-    # ── SL/TP/RR ──
+    # ── SL/TP/RR (回测调优: SL缓冲0.1, TP=2×1H ATR) ──
     entry_price = current_price or ind_base.get("close") or 0
     sl = tp = 0
+    atr_sl_buffer = 0.1
+    atr_tp_mult = 2.0
 
     if alert.direction == "long":
-        sl = sr_info["support"].price - atr_1h * 0.3 if "support" in sr_info else entry_price - atr_5m * 1.5
-        tp = sr_info["resistance"].price if "resistance" in sr_info else entry_price + atr_1h * 2.5
-        if tp <= sl or tp <= entry_price or (tp - entry_price) < (entry_price - sl) * 1.5:
-            tp = entry_price + atr_1h * 2.5
+        sl = sr_info["support"].price - atr_1h * atr_sl_buffer if "support" in sr_info else entry_price - atr_5m * 1.5
+        tp = entry_price + atr_1h * atr_tp_mult
+        if tp <= sl or tp <= entry_price:
+            tp = entry_price + atr_1h * atr_tp_mult
     elif alert.direction == "short":
-        sl = sr_info["resistance"].price + atr_1h * 0.3 if "resistance" in sr_info else entry_price + atr_5m * 1.5
-        tp = sr_info["support"].price if "support" in sr_info else entry_price - atr_1h * 2.5
-        if tp >= sl or tp >= entry_price or (entry_price - tp) < (sl - entry_price) * 1.5:
-            tp = entry_price - atr_1h * 2.5
+        sl = sr_info["resistance"].price + atr_1h * atr_sl_buffer if "resistance" in sr_info else entry_price + atr_5m * 1.5
+        tp = entry_price - atr_1h * atr_tp_mult
+        if tp >= sl or tp >= entry_price:
+            tp = entry_price - atr_1h * atr_tp_mult
     else:
         sl = entry_price - atr_5m * 1.5
         tp = entry_price + atr_1h * 1.5
@@ -848,9 +850,8 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             touches = support_lvl.touch_count
             opt_entry_price = support_lvl.price
             if opt_entry_price < entry_price:
-                opt_sl = opt_entry_price - atr_1h * 0.3
-                resistance_lvl = sr_info.get("resistance")
-                opt_tp = resistance_lvl.price if resistance_lvl else opt_entry_price + atr_1h * 3.0
+                opt_sl = opt_entry_price - atr_1h * atr_sl_buffer
+                opt_tp = opt_entry_price + atr_1h * atr_tp_mult
                 if opt_tp > opt_entry_price and opt_sl < opt_entry_price:
                     opt_rr_val = (opt_tp - opt_entry_price) / (opt_entry_price - opt_sl)
         elif alert.direction == "short" and "resistance" in sr_info:
@@ -858,9 +859,8 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             touches = resistance_lvl.touch_count
             opt_entry_price = resistance_lvl.price
             if opt_entry_price > entry_price:
-                opt_sl = opt_entry_price + atr_1h * 0.3
-                support_lvl = sr_info.get("support")
-                opt_tp = support_lvl.price if support_lvl else opt_entry_price - atr_1h * 3.0
+                opt_sl = opt_entry_price + atr_1h * atr_sl_buffer
+                opt_tp = opt_entry_price - atr_1h * atr_tp_mult
                 if opt_tp < opt_entry_price and opt_sl > opt_entry_price:
                     opt_rr_val = (opt_entry_price - opt_tp) / (opt_sl - opt_entry_price)
 
