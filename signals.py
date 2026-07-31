@@ -194,14 +194,17 @@ def _check_volume_spike(state: SignalState) -> dict | None:
     if not vr or vr < state.params.get("threshold", 3.0):
         return None
     roc = state.ind.get("roc") or 0
-    chg = abs(roc)
-    if chg < state.params.get("min_price_change", 0.5):
+    atr = state.ind.get("atr") or 1
+    close = state.ind.get("close") or 1
+    atr_pct = atr / close * 100
+    min_atr = state.params.get("min_price_change", 0.3)
+    if abs(roc) < atr_pct * min_atr:
         return None
     direction = "long" if roc > 0 else "short"
     sev = "critical" if vr >= 5 else "high" if vr >= 3 else "medium"
     return {"direction": direction, "severity": sev,
             "confidence": min(0.6 + (vr - 2) * 0.12, 0.9),
-            "evidence": f"放量突破 量{vr:.1f}x 涨跌{chg:.1f}%",
+            "evidence": f"放量突破 量{vr:.1f}x 涨跌{roc:+.1f}%",
             "volume_ratio": vr}
 
 
@@ -427,7 +430,11 @@ def _brew_rsi(state: SignalState) -> dict | None:
 def _brew_volume(state: SignalState) -> dict | None:
     vr = state.ind.get("volume_ratio") or 1
     roc = state.ind.get("roc") or 0
-    conds = {"VR≥2": vr >= 2.0, "ROC≥0.3%": abs(roc) >= 0.3}
+    atr = state.ind.get("atr") or 1
+    close = state.ind.get("close") or 1
+    atr_pct = atr / close * 100
+    chg = abs(roc)
+    conds = {"VR≥2": vr >= 2.0, "ROC≥ATR": chg >= atr_pct * 0.3}
     met_list = [k for k, v in conds.items() if v]
     missing_list = [k for k, v in conds.items() if not v]
     if met_list:
@@ -499,7 +506,7 @@ SIGNALS: list[SignalDef] = [
     SignalDef("fakeout",         "假突破反转", _check_fakeout,         {},                    "假破", "any"),
     SignalDef("retest",          "回踩确认",   _check_retest,          {},                    "回踩", "any"),
     SignalDef("rsi_extreme",     "RSI极值",    _check_rsi_extreme,     {"oversold": 25, "overbot": 75}, "RSI", "any"),
-    SignalDef("volume_spike",    "放量异动",   _check_volume_spike,    {"threshold": 3.0, "min_price_change": 0.5}, "VOL", "any"),
+    SignalDef("volume_spike",    "放量异动",   _check_volume_spike,    {"threshold": 3.0, "min_price_change": 0.3}, "VOL", "any"),
     SignalDef("trend_pullback",  "趋势回调",   _check_trend_pullback,  {},                    "回调", "trend"),
 ]
 
