@@ -230,12 +230,18 @@ class TFContext:
         self._ind_4h_by_pos: dict[int, dict] = {}
 
     def _ind_at_series(self, df: pd.DataFrame, series: pd.DataFrame | None,
-                       ts: pd.Timestamp, index: list, cache: dict) -> dict:
-        """≤ ts 的最近 bar 指标 (按 pos 缓存, 同 bar 内复用)"""
+                       ts: pd.Timestamp, index: list, cache: dict,
+                       bar_minutes: int) -> dict:
+        """使用 ≤ ts 的最近**已收盘** bar 指标 (时间戳=开盘时间, 需 +bar周期 ≤ ts)
+
+        bar_minutes: 该周期的分钟数 (5m=5, 1h=60, 4h=240)
+        """
         if series is None:
             return {}
         import bisect
-        pos = bisect.bisect_right(index, ts) - 1
+        # 已收盘条件: bar_open + bar_minutes <= ts → bar_open <= ts - bar_minutes
+        cutoff = ts - pd.Timedelta(minutes=bar_minutes)
+        pos = bisect.bisect_right(index, cutoff) - 1
         if pos < 0 or pos >= len(series):
             return {}
         if pos in cache:
@@ -246,11 +252,11 @@ class TFContext:
 
     def last_1h_ind(self, ts: pd.Timestamp) -> dict:
         return self._ind_at_series(self.df_1h, self._series_1h, ts, self._1h_index,
-                                   self._ind_1h_by_pos)
+                                   self._ind_1h_by_pos, 60)
 
     def last_4h_ind(self, ts: pd.Timestamp) -> dict:
         return self._ind_at_series(self.df_4h, self._series_4h, ts, self._4h_index,
-                                   self._ind_4h_by_pos)
+                                   self._ind_4h_by_pos, 240)
 
     def window_5m_ind(self, ts: pd.Timestamp) -> dict:
         """截至 ts 的 5m bar 指标 (从预计算序列取值)"""
@@ -356,7 +362,7 @@ def _events_cache_key(symbols: list[str], tf_cfg: dict, signal_overrides: dict |
         "overrides": signal_overrides or {},
         "dedup_minutes": dedup_minutes,
         "signals_fp": sig_fp,
-        "engine_version": 7,
+        "engine_version": 8,
     }
     raw = pickle.dumps(payload)
     return hashlib.md5(raw).hexdigest()[:16]
