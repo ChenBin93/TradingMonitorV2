@@ -6,6 +6,21 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
     if df is None or len(df) < 30:
         return None
 
+    idx = len(df) - 1
+    series = compute_series(df, params)
+    if series is None or idx >= len(series):
+        return None
+    return _row_to_ind(series, idx, df)
+
+
+def compute_series(df: pd.DataFrame, params: dict) -> pd.DataFrame | None:
+    """一次性计算全序列指标 (每列 = 一个指标序列, 与 df 对齐)
+
+    比逐 bar 调用 compute() 快 100 倍以上 — 回测引擎专用
+    """
+    if df is None or len(df) < 30:
+        return None
+
     roc = _calc_roc(df, params.get("roc_period", 10))
     rsi = _calc_rsi(df, params.get("rsi_period", 14))
     adx = _calc_adx(df, params.get("adx_period", 14))
@@ -20,10 +35,31 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
     ma5, ma20, ma60 = mas[f"ma_{ma_s}"], mas[f"ma_{ma_m}"], mas[f"ma_{ma_l}"]
     vol_ma = _calc_vol_ma(df, params.get("volume_ma_period", 20))
     vol_ratio = _calc_vol_ratio(df, vol_ma)
-    ttm_squeeze = _calc_ttm_squeeze(df)
 
-    idx = len(df) - 1
+    out = pd.DataFrame({
+        "close": df["close"],
+        "roc": roc,
+        "rsi": rsi,
+        "adx": adx,
+        "plus_di": plus_di,
+        "minus_di": minus_di,
+        "bb_width": bb_width,
+        "atr": atr,
+        "atr_rs": atr_rs,
+        "volume_ratio": vol_ratio,
+        "ma5": ma5,
+        "ma20": ma20,
+        "ma60": ma60,
+    })
+    out["ma_alignment"] = _ma_alignment_series(ma5, ma20, ma60)
+    out["bb_state"] = _bb_state_series(bb_width)
+    return out
+
+
+def _row_to_ind(series: pd.DataFrame, idx: int, df: pd.DataFrame) -> dict:
+    """从 compute_series 结果中取第 idx 行的指标 dict (与 live compute() 返回结构一致)"""
     v = lambda s: s.iloc[idx] if len(s) > idx and s.iloc[idx] == s.iloc[idx] else None
+    s = series
 
     o, h, l, c = df["open"].iloc[idx], df["high"].iloc[idx], df["low"].iloc[idx], df["close"].iloc[idx]
     body_top = max(o, c)
@@ -42,29 +78,67 @@ def compute(df: pd.DataFrame, params: dict) -> dict | None:
         elif upper_wick >= total_range * 0.6 and lower_wick <= total_range * 0.2:
             pinbar = "bearish"
 
+    ma5, ma20, ma60 = v(s["ma5"]), v(s["ma20"]), v(s["ma60"])
     return {
         "close": v(df["close"]),
-        "roc": v(roc),
-        "rsi": v(rsi),
-        "adx": v(adx),
-        "plus_di": v(plus_di),
-        "minus_di": v(minus_di),
-        "bb_width": v(bb_width),
-        "atr": v(atr),
-        "atr_rs": v(atr_rs),
-        "volume_ratio": v(vol_ratio),
-        "ma5": v(ma5),
-        "ma20": v(ma20),
-        "ma60": v(ma60),
-        "ma_alignment": _ma_alignment(ma5, ma20, ma60),
-        "bb_state": _bb_state(bb_width) if len(bb_width) > 10 else "unknown",
-        "compression_bars": _count_compression_bars(df),
-        "ttm_squeeze": ttm_squeeze,
+        "roc": v(s["roc"]),
+        "rsi": v(s["rsi"]),
+        "adx": v(s["adx"]),
+        "plus_di": v(s["plus_di"]),
+        "minus_di": v(s["minus_di"]),
+        "bb_width": v(s["bb_width"]),
+        "atr": v(s["atr"]),
+        "atr_rs": v(s["atr_rs"]),
+        "volume_ratio": v(s["volume_ratio"]),
+        "ma5": ma5,
+        "ma20": ma20,
+        "ma60": ma60,
+        "ma_alignment": _alignment_from_values(ma5, ma20, ma60),
+        "bb_state": v(s["bb_state"]) if s["bb_state"].notna().iloc[idx] else "unknown",
+        "compression_bars": _count_compression_bars(df.iloc[:idx + 1]),
+        "ttm_squeeze": _calc_ttm_squeeze(df.iloc[:idx + 1]),
         "pinbar": pinbar,
         "body_pct": body_pct,
         "body_dir": body_dir,
         "df": df,
     }
+
+
+def _ma_alignment_series(ma5, ma20, ma60) -> pd.Series:
+    out = pd.Series("neutral", index=ma5.index)
+    bull = (ma5 > ma20) & (ma20 > ma60)
+    bear = (ma5 < ma20) & (ma20 < ma60)
+    out[bull] = "bullish"
+    out[bear] = "bearish"
+    out[(bull | bear) == False] = "neutral"
+    return out
+
+
+def _alignment_from_values(ma5, ma20, ma60) -> str:
+    if ma5 is None or ma20 is None or ma60 is None:
+        return "neutral"
+    if ma5 > ma20 > ma60:
+        return "bullish"
+    if ma5 < ma20 < ma60:
+        return "bearish"
+    return "neutral"
+
+
+def _bb_state_series(bb_width) -> pd.Series:
+    out = pd.Series("unknown", index=bb_width.index)
+    if len(bb_width) <= 10:
+        return out
+    for i in range(10, len(bb_width)):
+        recent = bb_width.iloc[i - 9:i + 1]
+        first_half = recent.iloc[:5].mean()
+        second_half = recent.iloc[5:].mean()
+        if second_half > first_half * 1.15:
+            out.iloc[i] = "expanding"
+        elif second_half < first_half * 0.85:
+            out.iloc[i] = "contracting"
+        else:
+            out.iloc[i] = "flat"
+    return out
 
 
 def _calc_roc(df, period):
