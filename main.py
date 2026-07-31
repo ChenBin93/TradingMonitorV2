@@ -980,9 +980,9 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
 
         alert.meta["rs"] = " ".join(parts) if parts else ""
 
-        # ── RS 方向过滤 (回测: 多头需 RS>30, 空头需 RS<-30, 顺势内胜率45%+/夏普80+) ──
+        # ── RS 方向过滤 (回测: 多头需 RS>50, 空头需 RS<-50 → 1:1胜率72%/72%, 夏普92) ──
         rs_4h = (rs_dict.get("4h") or {}).get("score", 0)
-        rs_min = 30
+        rs_min = 50
         if alert.direction == "long" and rs_4h < rs_min:
             check.append("✗RS弱")
             alert.confidence = min(alert.confidence * 0.65, 0.60)
