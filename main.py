@@ -1316,10 +1316,13 @@ async def async_main():
                 ms_line += f"{ms['h1_line']}"
                 if ms.get("ma20_line"):
                     ms_line += f"\n距MA20: {ms['ma20_line']}"
-                if ms.get("sr"):
-                    ms_line += f"\n{ms['sr']}"
-                if ms.get("breadth"):
-                    ms_line += f" | {ms['breadth']}"
+                if ms.get("sr_1h"):
+                    ms_line += f"\n1H {ms['sr_1h']}"
+                if ms.get("sr_4h"):
+                    ms_line += f"\n4H {ms['sr_4h']}"
+                breadth_parts = [b for b in [ms.get("breadth_1h"), ms.get("breadth_4h")] if b]
+                if breadth_parts:
+                    ms_line += f"\n" + " · ".join(breadth_parts)
                 ms_line += f"\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
                 if btc_funding is not None:
                     crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"

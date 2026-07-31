@@ -19,6 +19,7 @@ def compute_market_state(tf_ind: dict) -> dict:
     # ── BTC 现价 (5m close 为实时价格) ──
     btc_price = (ind_5m or ind_1h).get("close")
     btc_atr_1h = ind_1h.get("atr") or 1
+    btc_atr_4h = (ind_4h or {}).get("atr") or 1
     btc_change_1h = ind_1h.get("roc", 0) or 0
 
     def _pullback(price, ma):
@@ -49,9 +50,7 @@ def compute_market_state(tf_ind: dict) -> dict:
     # ── 4H 趋势 ──
     adx_4h = (ind_4h or {}).get("adx", 0) or 0
     ma_align_4h = (ind_4h or {}).get("ma_alignment", "neutral")
-    ma20_4h = (ind_4h or {}).get("ma20")
     ma60_4h = (ind_4h or {}).get("ma60")
-    bb_state_4h = (ind_4h or {}).get("bb_state", "unknown")
     above_ma20_4h = ma20_4h and btc_price and btc_price > ma20_4h and ma20_4h > 0
     above_ma60_4h = ma60_4h and btc_price and btc_price > ma60_4h and ma60_4h > 0
 
@@ -67,7 +66,7 @@ def compute_market_state(tf_ind: dict) -> dict:
         trend_4h = f"4H中性(ADX{adx_4h:.0f})"
 
     # ── 1H S/R 位 ──
-    sr_str = ""
+    sr_1h_str = ""
     df_1h = ind_1h.get("df")
     if df_1h is not None and len(df_1h) >= 20 and btc_price:
         try:
@@ -80,51 +79,122 @@ def compute_market_state(tf_ind: dict) -> dict:
             if resistance:
                 p = resistance.price
                 parts.append(f"阻力:{fmt_price(p, btc_atr_1h)}({resistance.strength},{resistance.touch_count}触)")
-            sr_str = " · ".join(parts) if parts else ""
+            sr_1h_str = " · ".join(parts) if parts else ""
         except Exception:
             pass
 
-    # ── 1H 方向判定 ──
+    # ── 4H S/R 位 ──
+    sr_4h_str = ""
+    df_4h = ind_4h.get("df")
+    if df_4h is not None and len(df_4h) >= 20 and btc_price:
+        try:
+            levels_4h = find_swing_levels(df_4h, lookback=30)
+            support_4h, resistance_4h = get_nearest_levels(levels_4h, btc_price)
+            parts = []
+            if support_4h:
+                p = support_4h.price
+                parts.append(f"支撑:{fmt_price(p, btc_atr_4h)}({support_4h.strength},{support_4h.touch_count}触)")
+            if resistance_4h:
+                p = resistance_4h.price
+                parts.append(f"阻力:{fmt_price(p, btc_atr_4h)}({resistance_4h.strength},{resistance_4h.touch_count}触)")
+            sr_4h_str = " · ".join(parts) if parts else ""
+        except Exception:
+            pass
+
+    # ── 方向判定: 1H 定方向, 4H 调置信度 ──
     bias = "neutral"
     conf = 0
     bias_reason = ""
+    dir_1h_label = "1H中性"
+    dir_4h_label = ""
 
     if ma_align_1h == "bullish" and adx_1h >= 20:
         bias = "long"
         conf = min(50 + adx_1h * 0.5, 75)
-        bias_reason = f"1H多头 ADX={adx_1h:.0f}"
+        dir_1h_label = f"1H多头(ADX{adx_1h:.0f})"
     elif ma_align_1h == "bearish" and adx_1h >= 20:
         bias = "short"
         conf = min(50 + adx_1h * 0.5, 75)
-        bias_reason = f"1H空头 ADX={adx_1h:.0f}"
+        dir_1h_label = f"1H空头(ADX{adx_1h:.0f})"
     elif adx_1h < 15:
         bias = "neutral"
         conf = 0
+        dir_1h_label = f"1H震荡(ADX{adx_1h:.0f})"
         bias_reason = f"1H震荡 ADX={adx_1h:.0f}"
     else:
         bias = "neutral"
         conf = 0
+        dir_1h_label = f"1H中性(ADX{adx_1h:.0f})"
         bias_reason = f"1H中性 ADX={adx_1h:.0f}"
 
-    # ── 多空计数 ──
-    bull_count = sum(
+    # 4H 标签
+    if adx_4h >= 20 and ma_align_4h == "bullish":
+        dir_4h_label = f"4H多头(ADX{adx_4h:.0f})"
+    elif adx_4h >= 20 and ma_align_4h == "bearish":
+        dir_4h_label = f"4H空头(ADX{adx_4h:.0f})"
+    elif above_ma20_4h and above_ma60_4h:
+        dir_4h_label = f"4H偏多(ADX{adx_4h:.0f})"
+    elif not above_ma20_4h and not above_ma60_4h:
+        dir_4h_label = f"4H偏空(ADX{adx_4h:.0f})"
+    else:
+        dir_4h_label = f"4H中性(ADX{adx_4h:.0f})"
+
+    # 4H 校验
+    bias_4h = ""
+    if bias != "neutral":
+        align = (bias == "long" and ma_align_4h == "bullish") or (bias == "short" and ma_align_4h == "bearish")
+        oppose = (bias == "long" and ma_align_4h == "bearish") or (bias == "short" and ma_align_4h == "bullish")
+        if align and adx_4h >= 20:
+            conf = min(conf + 15, 85)
+            bias_4h = "✓4H"
+        elif oppose and adx_4h >= 20:
+            conf = max(conf - 20, 30)
+            bias_4h = "⚠逆4H"
+        elif align:
+            bias_4h = "趋4H"  # weak alignment
+
+    if not bias_reason:
+        bias_reason = f"{dir_1h_label}"
+    if bias_4h:
+        bias_reason += f" {bias_4h}"
+
+    # ── 1H 多空分布 ──
+    bull_1h = sum(
         1 for s in tf_ind
         if (tf_ind[s].get("1h") or {}).get("ma_alignment") == "bullish"
     )
-    bear_count = sum(
+    bear_1h = sum(
         1 for s in tf_ind
         if (tf_ind[s].get("1h") or {}).get("ma_alignment") == "bearish"
     )
-    total_with_data = bull_count + bear_count + sum(
+    neutral_1h = sum(
         1 for s in tf_ind
         if (tf_ind[s].get("1h") or {}).get("ma_alignment") == "neutral"
     )
+    total_1h = bull_1h + bear_1h + neutral_1h
 
-    breadth_str = ""
-    if total_with_data > 5:
-        bull_pct = bull_count / total_with_data * 100
-        bear_pct = bear_count / total_with_data * 100
-        breadth_str = f"多{bull_pct:.0f}%/空{bear_pct:.0f}%"
+    breadth_1h = ""
+    if total_1h > 5:
+        breadth_1h = f"1H 多{bull_1h/total_1h*100:.0f}%/空{bear_1h/total_1h*100:.0f}%"
+
+    # ── 4H 多空分布 ──
+    bull_4h = sum(
+        1 for s in tf_ind
+        if (tf_ind[s].get("4h") or {}).get("ma_alignment") == "bullish"
+    )
+    bear_4h = sum(
+        1 for s in tf_ind
+        if (tf_ind[s].get("4h") or {}).get("ma_alignment") == "bearish"
+    )
+    neutral_4h = sum(
+        1 for s in tf_ind
+        if (tf_ind[s].get("4h") or {}).get("ma_alignment") == "neutral"
+    )
+    total_4h = bull_4h + bear_4h + neutral_4h
+
+    breadth_4h = ""
+    if total_4h > 5:
+        breadth_4h = f"4H 多{bull_4h/total_4h*100:.0f}%/空{bear_4h/total_4h*100:.0f}%"
 
     # ── 生成 desc ──
     btc_disp = f"{btc_price:.0f}" if btc_price and btc_price > 100 else f"{btc_price:.5f}" if btc_price else "-"
@@ -151,13 +221,16 @@ def compute_market_state(tf_ind: dict) -> dict:
         "h1_line": h1_line,
         "ma20_line": ma20_line,
         "reason": bias_reason,
-        "sr": sr_str,
-        "breadth": breadth_str,
+        "sr_1h": sr_1h_str,
+        "sr_4h": sr_4h_str,
+        "breadth_1h": breadth_1h,
+        "breadth_4h": breadth_4h,
         "btc_price": btc_price,
         "btc_change_1h": btc_change_1h,
         "adx_1h": round(adx_1h, 1),
         "adx_4h": round(adx_4h, 1),
         "bb_state_1h": bb_state_1h,
         "ma_1h": ma_align_1h,
+        "ma_4h": ma_align_4h,
         "atr_1h": round(btc_atr_1h, 1),
     }
