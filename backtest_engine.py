@@ -279,6 +279,48 @@ class SignalEvent:
     atr_5m: float
     support_price: float | None = None
     resistance_price: float | None = None
+    # ── 触发时的市场状态 (供逐条件分析) ──
+    ma_1h: str = "neutral"          # 1H MA 排列 bullish/bearish/neutral
+    adx_1h: float = 0.0             # 1H ADX
+    ma_4h: str = "neutral"          # 4H MA 排列
+    adx_4h: float = 0.0             # 4H ADX
+    close_4h: float | None = None   # 4H 收盘 (宏观 bias 用)
+    ma20_4h: float | None = None
+    ma60_4h: float | None = None
+    macro_bias: str = "neutral"     # _symbol_bias 同款逻辑: long/short/neutral
+    adx_5m: float = 0.0             # 5m ADX (gate 判断)
+    pos_in_range: float | None = None  # 价格在 S/R 区间的位置 0=贴支撑 1=贴阻力
+
+
+def _macro_bias(ind_1h: dict, ind_4h: dict) -> str:
+    """与 live main._symbol_bias 同款: 4H MA20/MA60+ADX 稳定趋势, 1H 确认"""
+    if not ind_4h or not ind_1h:
+        return "neutral"
+    close_4h = ind_4h.get("close")
+    ma20_4h = ind_4h.get("ma20")
+    ma60_4h = ind_4h.get("ma60")
+    adx_4h = ind_4h.get("adx", 0) or 0
+    adx_1h = ind_1h.get("adx", 0) or 0
+    ma_1h = ind_1h.get("ma_alignment", "neutral")
+
+    if close_4h is None:
+        return "neutral"
+    above_ma20 = ma20_4h and close_4h > ma20_4h
+    above_ma60 = ma60_4h and close_4h > ma60_4h
+
+    if above_ma20 and above_ma60 and adx_4h >= 20 and ma_1h == "bullish":
+        return "long"
+    if not above_ma20 and not above_ma60 and adx_4h >= 20 and ma_1h == "bearish":
+        return "short"
+    if above_ma20 and above_ma60 and ma_1h == "bullish" and adx_1h >= 20:
+        return "long"
+    if not above_ma20 and not above_ma60 and ma_1h == "bearish" and adx_1h >= 20:
+        return "short"
+    if above_ma60 and adx_4h >= 18:
+        return "long"
+    if not above_ma60 and adx_4h >= 18:
+        return "short"
+    return "neutral"
 
 
 @dataclass
@@ -311,7 +353,7 @@ def _events_cache_key(symbols: list[str], tf_cfg: dict, signal_overrides: dict |
         "overrides": signal_overrides or {},
         "dedup_minutes": dedup_minutes,
         "signals_fp": sig_fp,
-        "engine_version": 4,
+        "engine_version": 5,
     }
     raw = pickle.dumps(payload)
     return hashlib.md5(raw).hexdigest()[:16]
@@ -392,6 +434,7 @@ def _detect_signals_inner(
                 ind_1h = ctx.last_1h_ind(ts)
                 if not ind_1h:
                     continue
+                ind_4h = ctx.last_4h_ind(ts)
 
                 regime = get_regime(ind)
                 direction = get_direction(ind)
@@ -445,11 +488,26 @@ def _detect_signals_inner(
                         if resistance:
                             resistance_price = resistance.price
 
+                    # 触发时的市场状态
+                    pos_in_range = None
+                    if support_price and resistance_price and resistance_price > support_price:
+                        pos_in_range = (entry_price - support_price) / (resistance_price - support_price)
+
                     events.append(SignalEvent(
                         symbol=sym, signal=sig_def.id, direction=sig_dir,
                         ts=ts, entry_price=entry_price,
                         atr_1h=atr_1h, atr_5m=atr_5m,
                         support_price=support_price, resistance_price=resistance_price,
+                        ma_1h=ind_1h.get("ma_alignment", "neutral"),
+                        adx_1h=ind_1h.get("adx", 0) or 0,
+                        ma_4h=ind_4h.get("ma_alignment", "neutral"),
+                        adx_4h=ind_4h.get("adx", 0) or 0,
+                        close_4h=ind_4h.get("close"),
+                        ma20_4h=ind_4h.get("ma20"),
+                        ma60_4h=ind_4h.get("ma60"),
+                        macro_bias=_macro_bias(ind_1h, ind_4h),
+                        adx_5m=ind.get("adx", 0) or 0,
+                        pos_in_range=pos_in_range,
                     ))
         return events
     finally:
