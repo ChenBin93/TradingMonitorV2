@@ -40,8 +40,8 @@ def is_tradable_regime(regime: str) -> bool:
 
 # 场景 → (标签, 3年胜率区间, 按TP增大趋势)
 SCENE_WR = {
-    "episode_long":   ("插曲多",  "55-58%"),
-    "episode_short":  ("插曲空",  "57-61%"),
+    "episode_long":   ("顺日逆时多",  "55-58%"),
+    "episode_short":  ("顺日逆时空",  "57-61%"),
     "follow_long":    ("顺势多",  "53-55%"),
     "follow_short":   ("顺势空",  "54-57%"),
     "counter_long":   ("逆势多",  "45%"),
@@ -74,7 +74,7 @@ def _t4_state(ind_4h: dict) -> str:
 
 def scene_of(direction: str, ind_4h: dict, bias: str) -> str:
     """场景判定:
-    episode_* = 日线顺势 + 4H逆向(插曲) — 最优 (顺大逆小)
+    episode_* = 日线顺势 + 4H逆向(顺日逆时) — 最优 (顺大逆小)
     follow_*  = 日线+4H同向(全顺势)
     counter_* = 逆日线方向 — 3年验证 44-47% 低期望
     neutral   = 无趋势

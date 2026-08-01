@@ -503,7 +503,7 @@ def format_consolidated_report(
     longs = sum(1 for a in quality if a.direction == "long")
     shorts = sum(1 for a in quality if a.direction == "short")
 
-    # ── 场景统计 (3年验证: 插曲最优/逆势低期望) ──
+    # ── 场景统计 (3年验证: 顺日逆时最优/逆势低期望) ──
     from collections import Counter
     scene_cnt = Counter(a.details.get("scene", "") for a in quality)
     ep_cnt = scene_cnt.get("episode_long", 0) + scene_cnt.get("episode_short", 0)
@@ -512,7 +512,7 @@ def format_consolidated_report(
     if ep_cnt or ct_cnt:
         parts = []
         if ep_cnt:
-            parts.append(f"插曲{ep_cnt}")
+            parts.append(f"顺日逆时{ep_cnt}")
         if scene_cnt.get("follow_long", 0) + scene_cnt.get("follow_short", 0):
             parts.append(f"顺势{scene_cnt.get('follow_long',0)+scene_cnt.get('follow_short',0)}")
         if ct_cnt:
@@ -1019,7 +1019,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             check.append("✓RS同向")
 
         # ── RS 位置依赖 (3年验证: RS价值取决于所处场景) ──
-        # 插曲(回调)中 RS强 = 抗跌性好 → 做多加分 (57.1%)
+        # 顺日逆时(回调)中 RS强 = 抗跌性好 → 做多加分 (57.1%)
         # 全顺势中   RS强 = 过冲高潮   → 做多减分 (52.8%)
         # 日线空 + RS<-60 (极端弱势) → 做空加分 (58.3%)
         scene = alert.details.get("scene", "neutral")
