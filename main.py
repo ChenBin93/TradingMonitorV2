@@ -962,8 +962,19 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
 
         alert.meta["rs"] = " ".join(parts) if parts else ""
 
-        # ── RS 方向过滤已移除 (修复未来函数后验证无效: 各档50-52%) ──
-        # RS 保留为展示 + 轻度置信度参考 (监控视角)
+        # ── RS 方向一致性 (416天回测: 全顺势组合下 RS与方向相反是危险信号) ──
+        # bull×bull×bull 顺RS 52.6% vs 逆RS 46.5% | bear×bull×bull 顺RS 67.6% vs 逆RS 62.5%
+        rs_4h_score = (rs_dict.get("4h") or {}).get("score", 0)
+        rs_dir_ok = (alert.direction == "long" and rs_4h_score > 0) or \
+                    (alert.direction == "short" and rs_4h_score < 0)
+        bias_ok = alert.details.get("macro_bias") == alert.direction
+        h1_ok = (dir_1h == "bullish" and alert.direction == "long") or \
+                (dir_1h == "bearish" and alert.direction == "short")
+        if bias_ok and h1_ok and not rs_dir_ok:
+            check.append("⚠RS逆势")
+            alert.confidence = min(alert.confidence * 0.90, 1.0)
+        elif bias_ok and h1_ok and rs_dir_ok:
+            check.append("✓RS同向")
 
         # 每周期独立增强: 方向与信号匹配的 TF 越多, 置信度越高
         agree_count = 0
