@@ -405,6 +405,44 @@ def _check_trend_pullback(state: SignalState) -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 布林带反转信号 (3年1094天: 日线空/中性 + 1H BB上轨破轨做空 = 68%稳定)
+# 高胜率小目标策略: TP=0.3-0.5×1H ATR, SL=0.5×1H ATR, W=24-48h
+# ═══════════════════════════════════════════════════════════════════════
+
+def _check_bb_reversal(state: SignalState) -> dict | None:
+    ind_1h = state.ind_1h
+    if not ind_1h:
+        return None
+    ma20 = ind_1h.get("ma20")
+    bbw = ind_1h.get("bb_width")
+    close = state.ind.get("close")
+    atr_5m = state.ind.get("atr") or 1
+    adx_1h = ind_1h.get("adx", 0) or 0
+    if not ma20 or not bbw or not close or bbw <= 0:
+        return None
+    upper = ma20 * (1 + bbw / 200)
+    if close <= upper:
+        return None
+    bias = state.params.get("bias", "neutral")
+    # 3年验证环境: 日线空/中性 + 不做1H强趋势中的破轨
+    if bias == "long":
+        return None
+    if adx_1h >= 30:
+        return None
+    # 破轨幅度 (ATR 单位) — 越远越极端越有效 (σ越大越强)
+    overshoot = (close - upper) / max(atr_5m, 1e-9)
+    sev = "critical" if overshoot >= 0.5 else "high"
+    conf = 0.74 if overshoot >= 0.5 else 0.68
+    return {
+        "direction": "short",
+        "severity": sev,
+        "confidence": conf,
+        "evidence": f"BB上轨破轨{overshoot:.1f}σ(回归)",
+        "bb_overshoot": overshoot,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # 信号酝酿 — 提前告知哪些信号接近触发
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -524,6 +562,7 @@ SIGNALS: list[SignalDef] = [
     SignalDef("fakeout",         "假突破反转", _check_fakeout,         {},                    "假破", "any"),
     SignalDef("retest",          "回踩确认",   _check_retest,          {},                    "回踩", "any"),
     SignalDef("trend_pullback",  "趋势回调",   _check_trend_pullback,  {},                    "回调", "trend"),
+    SignalDef("bb_reversal",     "BB反转",     _check_bb_reversal,     {},                    "回归", "any"),
 ]
 
 

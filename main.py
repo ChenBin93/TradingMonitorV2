@@ -17,7 +17,7 @@ from notify import Feishu
 from utils import setup_logging, start_health_server, fmt_price
 from support_resistance import find_swing_levels, get_nearest_levels
 from volume_profile import compute_volume_profile, get_nearest_nodes
-from market_state import compute_market_state
+from market_state import compute_market_state, scene_of, SCENE_WR, SCENE_BOOST
 from relative_strength import compute_rs
 
 BJ_TZ = timezone(timedelta(hours=8))
@@ -94,7 +94,7 @@ class Alert:
     def tag(self) -> str:
         tags = {
             "breakout": "突破", "fakeout": "假破", "retest": "回踩",
-            "trend_pullback": "回调",
+            "trend_pullback": "回调", "bb_reversal": "回归",
         }
         return tags.get(self.signal_type, self.signal_type[:4])
 
@@ -102,7 +102,7 @@ class Alert:
     def name(self) -> str:
         names = {
             "breakout": "防线突破", "fakeout": "假突破反转", "retest": "回踩确认",
-            "trend_pullback": "趋势回调",
+            "trend_pullback": "趋势回调", "bb_reversal": "BB反转",
         }
         return names.get(self.signal_type, self.signal_type)
 
@@ -406,7 +406,11 @@ def fmt_short_alert(a: Alert) -> str:
     bias_icons = {"long": "📈4H多", "short": "📉4H空", "neutral": "➖无趋势"}
     bias_str = f" {bias_icons.get(bias, '')}" if bias else ""
 
-    line = f"▸ {icon} {sym} {d} {a.name}{persist}{bias_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
+    # ── 场景标记 (3年验证胜率) ──
+    scene = m.get("scene", "")
+    scene_str = f" {scene}" if scene else ""
+
+    line = f"▸ {icon} {sym} {d} {a.name}{persist}{bias_str}{scene_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
     line2 = f"    S:{s} R:{r}  |  {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
@@ -499,8 +503,24 @@ def format_consolidated_report(
     longs = sum(1 for a in quality if a.direction == "long")
     shorts = sum(1 for a in quality if a.direction == "short")
 
+    # ── 场景统计 (3年验证: 插曲最优/逆势低期望) ──
+    from collections import Counter
+    scene_cnt = Counter(a.details.get("scene", "") for a in quality)
+    ep_cnt = scene_cnt.get("episode_long", 0) + scene_cnt.get("episode_short", 0)
+    ct_cnt = scene_cnt.get("counter_long", 0) + scene_cnt.get("counter_short", 0)
+    scene_line = ""
+    if ep_cnt or ct_cnt:
+        parts = []
+        if ep_cnt:
+            parts.append(f"插曲{ep_cnt}")
+        if scene_cnt.get("follow_long", 0) + scene_cnt.get("follow_short", 0):
+            parts.append(f"顺势{scene_cnt.get('follow_long',0)+scene_cnt.get('follow_short',0)}")
+        if ct_cnt:
+            parts.append(f"逆势{ct_cnt}")
+        scene_line = f"\n场景: " + " · ".join(parts)
+
     lines = [f"━━━ {cat_prefix}V2 扫描 {time_str} {_current_session()} ━━━",
-             f"{symbol_count}币 · {total_alerts}信号 · 推送{len(merged_list)}条 · 多{longs}/空{shorts}"]
+             f"{symbol_count}币 · {total_alerts}信号 · 推送{len(merged_list)}条 · 多{longs}/空{shorts}{scene_line}"]
 
     if merged_list:
         lines.append("")
@@ -615,6 +635,7 @@ def do_scan(
 
     # ── 第二遍：逐 TF 检查信号（1H/4H 仅做方向锚）──
     for sym, tf_ind in all_ind.items():
+        sym_bias = _symbol_bias(tf_ind)
         for tf, ind in tf_ind.items():
             if tf in ("1h", "4h"):
                 continue
@@ -636,7 +657,7 @@ def do_scan(
                 if sig_def.gate == "range" and adx_val >= 20:
                     continue
                 try:
-                    state.params = sig_def.params
+                    state.params = {**sig_def.params, "bias": sym_bias}
                     result = sig_def.check(state)
                     if result:
                         alert = Alert(
@@ -736,6 +757,27 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     else:
         # bias 相反 — 修复后 49.2% 略负, 监控保留但标记 (不做硬过滤)
         check.append("⚠逆趋势")
+
+    # ── 场景引擎 (3年1094天平衡数据验证: 顺大逆小是唯一稳定edge) ──
+    # episode=日线顺势+4H逆向(最优) | follow=全顺势 | counter=逆日线(低期望)
+    scene = scene_of(alert.direction, ind_4h, bias)
+    alert.details["scene"] = scene
+    if scene in SCENE_WR:
+        label, wr = SCENE_WR[scene]
+        alert.meta["scene"] = f"{label} {wr}"
+        boost = SCENE_BOOST.get(scene, 1.0)
+        alert.confidence = min(alert.confidence * boost, 1.0)
+        if scene.startswith("episode"):
+            check.append(f"✓{label} {wr}")
+        elif scene.startswith("follow"):
+            check.append(f"✓{label} {wr}")
+        else:
+            check.append(f"⚠{label} {wr}")
+
+    # ── BB 反转环境补充 (3年: 日线中性也是回归环境, 但置信度略低) ──
+    if alert.signal_type == "bb_reversal":
+        if bias == "neutral":
+            alert.confidence = min(alert.confidence * 0.95, 1.0)
 
     # ── 真实确认的毒药组合 (修复后回测 1:1 胜率, 监控标记+轻度降权) ──
     # fakeout/long 45.1% | 1H空头+做多 46.1%
@@ -975,6 +1017,25 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             alert.confidence = min(alert.confidence * 0.90, 1.0)
         elif bias_ok and h1_ok and rs_dir_ok:
             check.append("✓RS同向")
+
+        # ── RS 位置依赖 (3年验证: RS价值取决于所处场景) ──
+        # 插曲(回调)中 RS强 = 抗跌性好 → 做多加分 (57.1%)
+        # 全顺势中   RS强 = 过冲高潮   → 做多减分 (52.8%)
+        # 日线空 + RS<-60 (极端弱势) → 做空加分 (58.3%)
+        scene = alert.details.get("scene", "neutral")
+        rs_4h_val = (rs_dict.get("4h") or {}).get("score", 0)
+        if scene == "episode_long" and rs_4h_val > 60:
+            check.append("✓抗跌")
+            alert.confidence = min(alert.confidence * 1.05, 1.0)
+        elif scene == "follow_long" and rs_4h_val > 60:
+            check.append("⚠过冲")
+            alert.confidence = min(alert.confidence * 0.93, 1.0)
+        elif scene == "follow_short" and rs_4h_val < -60:
+            check.append("✓弱势延续")
+            alert.confidence = min(alert.confidence * 1.04, 1.0)
+        elif scene == "episode_short" and rs_4h_val < -60:
+            check.append("✓极弱")
+            alert.confidence = min(alert.confidence * 1.05, 1.0)
 
         # 每周期独立增强: 方向与信号匹配的 TF 越多, 置信度越高
         agree_count = 0

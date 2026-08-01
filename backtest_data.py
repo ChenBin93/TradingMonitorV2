@@ -31,6 +31,7 @@ DAYS = 60
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS candles (
             symbol TEXT NOT NULL,

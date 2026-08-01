@@ -33,6 +33,71 @@ def is_tradable_regime(regime: str) -> bool:
     return regime in ("strong_trend", "mid_trend")
 
 
+# ────────────────────────────────────────────────────────────────
+# 场景引擎 (3年1094天平衡数据验证, 1:1 严格口径, 同bar双命中跳过)
+# 场景 = 信号方向 × (日线bias × 4H状态) — 顺大逆小是唯一稳定edge
+# ────────────────────────────────────────────────────────────────
+
+# 场景 → (标签, 3年胜率区间, 按TP增大趋势)
+SCENE_WR = {
+    "episode_long":   ("插曲多",  "55-58%"),
+    "episode_short":  ("插曲空",  "57-61%"),
+    "follow_long":    ("顺势多",  "53-55%"),
+    "follow_short":   ("顺势空",  "54-57%"),
+    "counter_long":   ("逆势多",  "45%"),
+    "counter_short":  ("逆势空",  "47%"),
+}
+
+# 场景 → 期望增益 (置信度乘数)
+SCENE_BOOST = {
+    "episode_long": 1.08, "episode_short": 1.08,
+    "follow_long": 1.04, "follow_short": 1.04,
+    "counter_long": 0.85, "counter_short": 0.85,
+}
+
+
+def _t4_state(ind_4h: dict) -> str:
+    """4H 状态: long/short/neutral (MA排列优先, close vs MA20 兜底)"""
+    if not ind_4h:
+        return "neutral"
+    ma_align = ind_4h.get("ma_alignment", "neutral")
+    if ma_align == "bullish":
+        return "long"
+    if ma_align == "bearish":
+        return "short"
+    close_4h = ind_4h.get("close")
+    ma20_4h = ind_4h.get("ma20")
+    if close_4h and ma20_4h:
+        return "long" if close_4h > ma20_4h else "short"
+    return "neutral"
+
+
+def scene_of(direction: str, ind_4h: dict, bias: str) -> str:
+    """场景判定:
+    episode_* = 日线顺势 + 4H逆向(插曲) — 最优 (顺大逆小)
+    follow_*  = 日线+4H同向(全顺势)
+    counter_* = 逆日线方向 — 3年验证 44-47% 低期望
+    neutral   = 无趋势
+    """
+    if bias == "neutral" or direction not in ("long", "short"):
+        return "neutral"
+    t4 = _t4_state(ind_4h)
+    if t4 == "neutral":
+        return "neutral"
+    if direction == "long":
+        if bias == "long" and t4 == "short":
+            return "episode_long"
+        if bias == "long" and t4 == "long":
+            return "follow_long"
+        return "counter_long"
+    else:
+        if bias == "short" and t4 == "long":
+            return "episode_short"
+        if bias == "short" and t4 == "short":
+            return "follow_short"
+        return "counter_short"
+
+
 def _empty_state(desc: str) -> dict:
     return {
         "bias": "neutral", "confidence": 0, "desc": desc, "btc_price": None,

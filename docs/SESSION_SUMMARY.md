@@ -75,3 +75,31 @@ python3 backtest_data.py --days 416 --timeframes 1h 4h
 3. **日线数据源加入 live**（当前用 4H bias 近似）— 未做
 4. 5M 数据扩展至 416 天 — 未做（下载约 1-2 小时）
 5. 实盘观察期 — 未开始
+
+## 五、Live 系统改造 (2026-08-01) — 结合 39 章研究
+
+### 场景引擎 (market_state.py)
+- `scene_of(direction, ind_4h, bias)`: episode/follow/counter/neutral
+- 3年胜率表: 插曲多 55-58% / 插曲空 57-61% / 顺势多 53-55% / 顺势空 54-57% / 逆势 45-47%
+- 置信度乘数: episode×1.08, follow×1.04, counter×0.85
+
+### 新信号 (signals.py)
+- `bb_reversal` BB反转: 1H BB上轨破轨 + bias非多 + ADX<30 → 做空 (3年68%稳定)
+- do_scan 注入 bias 到 state.params
+
+### 富化标记 (main.py)
+- 推送行显示场景: `📉4H空 插曲空 57-61%`
+- 检查项: ✓插曲多/空 ✓顺势 ✓抗跌(插曲+RS>60) ⚠过冲(全顺势+RS>60) ✓极弱(RS<-60) ⚠逆势多/空
+- 头部统计: 插曲X · 顺势Y · 逆势Z
+- Alert.tag/name 加 bb_reversal
+
+### 验证
+- 场景引擎 8 用例全过; bb_reversal 3 用例全过
+- live 重启后扫描正常 (周末平静期 raw 0-1 属正常)
+- 5M 3年下载后台进行中 (~10h, BTC/ETH 已完成)
+
+### 3年数据关键修正 (38-39章)
+- 插曲真实 Δpp +2.4 (416天 +8-15 是熊市虚高); 方向优势对称 ±8.7pp
+- 插曲做多 3年 54-58% (TP越大越强), 牛市年 TP2.0 = 56.5%
+- BB反转 3年 68% 稳定 (参数不变); 插曲系统 62% → 3年 50% (厚尾EV正)
+- 空侧稳定小优势 +0.5~2.6pp (四年不变)

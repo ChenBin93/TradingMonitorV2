@@ -1,0 +1,32 @@
+[32m2026-08-01 13:34:41.463[0m | [1mINFO    [0m | [36m__main__[0m:[36masync_main[0m:[36m1205[0m - [1mMonitoring 67 symbols x 3 timeframes[0m
+[32m2026-08-01 13:34:50.665[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 5m: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:34:50.955[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 1h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:34:50.957[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 4h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:34:57.413[0m | [1mINFO    [0m | [36m__main__[0m:[36masync_main[0m:[36m1228[0m - [1mCache prefill done[0m
+[32m2026-08-01 13:34:57.428[0m | [1mINFO    [0m | [36mhistory[0m:[36mdownload_and_compute[0m:[36m261[0m - [1m[History] Starting download: 67 symbols, [90, 180, 365] days[0m
+[32m2026-08-01 13:34:57.774[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 5m: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:34:58.009[0m | [1mINFO    [0m | [36mokx[0m:[36m_read_loop[0m:[36m249[0m - [1mWebSocket connected[0m
+[32m2026-08-01 13:34:58.101[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 1h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:34:58.453[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 4h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:34:58.940[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 5m: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:34:59.280[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 1h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:34:59.663[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 4h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:35:00.395[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 5m: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:35:00.858[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 1h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:35:01.388[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 4h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:35:01.608[0m | [1mINFO    [0m | [36mhistory[0m:[36mdownload_and_compute[0m:[36m276[0m - [1m[History] Download complete, computing stats...[0m
+[32m2026-08-01 13:35:11.179[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 5m: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:35:11.252[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 1h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:35:11.437[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 4h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:35:38.096[0m | [1mINFO    [0m | [36mhistory[0m:[36mdownload_and_compute[0m:[36m278[0m - [1m[History] Stats computation complete[0m
+[32m2026-08-01 13:35:48.895[0m | [1mINFO    [0m | [36mnotify[0m:[36m_send_sdk[0m:[36m65[0m - [1mFeishu message sent[0m
+[32m2026-08-01 13:35:48.896[0m | [1mINFO    [0m | [36m__main__[0m:[36masync_main[0m:[36m1406[0m - [1mScan #1: 0 push alerts (raw 1 signals scanned)[0m
+[32m2026-08-01 13:35:50.412[0m | [1mINFO    [0m | [36mnotify[0m:[36m_send_sdk[0m:[36m65[0m - [1mFeishu message sent[0m
+[32m2026-08-01 13:35:50.413[0m | [1mINFO    [0m | [36m__main__[0m:[36masync_main[0m:[36m1432[0m - [1mWarnings pushed: 58 items[0m
+[32m2026-08-01 13:40:10.096[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 1h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:40:10.138[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 5m: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:40:10.157[0m | [33m[1mWARNING [0m | [36mokx[0m:[36mfetch_ohlcv[0m:[36m157[0m - [33m[1mfetch_ohlcv failed for FET/USDT:USDT 4h: Instrument ID, Instrument ID code, or Spread ID doesn't exist.[0m
+[32m2026-08-01 13:40:35.167[0m | [1mINFO    [0m | [36mnotify[0m:[36m_send_sdk[0m:[36m65[0m - [1mFeishu message sent[0m
+[32m2026-08-01 13:40:36.352[0m | [1mINFO    [0m | [36mnotify[0m:[36m_send_sdk[0m:[36m65[0m - [1mFeishu message sent[0m
+[32m2026-08-01 13:40:36.359[0m | [1mINFO    [0m | [36m__main__[0m:[36masync_main[0m:[36m1388[0m - [1mScan #2: 1 alerts (1 new + 0 persisted), 1 ranked (crypto:1)[0m
+[32m2026-08-01 13:40:37.379[0m | [1mINFO    [0m | [36mnotify[0m:[36m_send_sdk[0m:[36m65[0m - [1mFeishu message sent[0m
