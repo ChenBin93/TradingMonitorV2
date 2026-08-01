@@ -414,7 +414,8 @@ def fmt_short_alert(a: Alert) -> str:
     line2 = f"    S:{s} R:{r}  |  {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
-    opt_line = f"\n   最优: {opt_entry}→RR:{opt_rr}" if opt_entry and opt_rr else ""
+    opt_dist = m.get("opt_dist", "")
+    opt_line = f"\n   挂单: {opt_entry}→RR:{opt_rr}({opt_dist})" if opt_entry and opt_rr and opt_dist else ""
     vp_s = m.get("vp_support", "")
     vp_r = m.get("vp_resistance", "")
     vp_line = f"\n   量防线: S:{vp_s} R:{vp_r}" if vp_s or vp_r else ""
@@ -774,10 +775,13 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         else:
             check.append(f"⚠{label} {wr}")
 
-    # ── BB 反转环境补充 (3年: 日线中性也是回归环境, 但置信度略低) ──
+    # ── BB 反转环境补充 (3年: 日线空/中性 + 上轨破轨 = 68% 稳定, 中性也成立) ──
     if alert.signal_type == "bb_reversal":
-        if bias == "neutral":
-            alert.confidence = min(alert.confidence * 0.95, 1.0)
+        if bias == "neutral" and scene == "neutral":
+            alert.meta["scene"] = "回归 68%"
+            check.append("✓回归 68%")
+        elif bias == "short":
+            alert.confidence = min(alert.confidence * 1.05, 1.0)
 
     # ── 真实确认的毒药组合 (修复后回测 1:1 胜率, 监控标记+轻度降权) ──
     # fakeout/long 45.1% | 1H空头+做多 46.1%
@@ -802,11 +806,15 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
 
         if support:
             p = support.price
-            alert.meta["support"] = f"{fmt_price(p, atr_1h)}({support.strength},{support.touch_count}触)"
+            dist_a = abs(current_price - p) / max(atr_1h, 1e-9)
+            dist_lbl = "近" if dist_a <= 0.5 else "远" if dist_a >= 1.5 else ""
+            alert.meta["support"] = f"{fmt_price(p, atr_1h)}({support.strength},{support.touch_count}触{dist_lbl})"
             sr_info["support"] = support
         if resistance:
             p = resistance.price
-            alert.meta["resistance"] = f"{fmt_price(p, atr_1h)}({resistance.strength},{resistance.touch_count}触)"
+            dist_a = abs(current_price - p) / max(atr_1h, 1e-9)
+            dist_lbl = "近" if dist_a <= 0.5 else "远" if dist_a >= 1.5 else ""
+            alert.meta["resistance"] = f"{fmt_price(p, atr_1h)}({resistance.strength},{resistance.touch_count}触{dist_lbl})"
             sr_info["resistance"] = resistance
 
         pos_in_range = None
@@ -833,25 +841,40 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         else:
             check.append("?边界")
 
-    # ── SL/TP/RR (回测调优: SL缓冲0.1, TP=2×1H ATR) ──
+    # ── SL/TP/RR (3年1094天验证参数: 按场景给可达目标, SL下限1×1H ATR防RR虚高) ──
     entry_price = current_price or ind_base.get("close") or 0
     sl = tp = 0
     atr_sl_buffer = 0.1
-    atr_tp_mult = 2.0
+    scene = alert.details.get("scene", "neutral")
+    if alert.signal_type == "bb_reversal":
+        # BB反转 (3年68%稳定): 高胜率小目标 1:1 — TP=0.5×1H ATR, SL=0.5×1H ATR
+        atr_tp_mult = 0.5
+        sl_min = atr_1h * 0.5
+    elif scene.startswith("episode"):
+        # 顺日逆时: TP=2×1H ATR 吃完整波段 (3年57-61%), SL≥1×1H ATR 保RR真实
+        atr_tp_mult = 2.0
+        sl_min = atr_1h * 1.0
+    elif scene.startswith("follow"):
+        atr_tp_mult = 1.5
+        sl_min = atr_1h * 1.0
+    else:
+        # 逆势/中性: 保守小目标 (低期望场景)
+        atr_tp_mult = 1.0
+        sl_min = atr_1h * 1.0
 
     if alert.direction == "long":
         sl = sr_info["support"].price - atr_1h * atr_sl_buffer if "support" in sr_info else entry_price - atr_5m * 1.5
         tp = entry_price + atr_1h * atr_tp_mult
-        # SL 距离下限保护: 至少 0.5×1H ATR (SL太近 → RR虚高 → 实盘被噪声打掉)
-        if entry_price - sl < atr_1h * 0.5:
-            sl = entry_price - atr_1h * 0.5
+        # SL 距离下限: 按场景 (bb_reversal 0.5 / 其余 1.0) — SL太近→RR虚高→实盘被噪声打掉
+        if entry_price - sl < sl_min:
+            sl = entry_price - sl_min
         if tp <= sl or tp <= entry_price:
             tp = entry_price + atr_1h * atr_tp_mult
     elif alert.direction == "short":
         sl = sr_info["resistance"].price + atr_1h * atr_sl_buffer if "resistance" in sr_info else entry_price + atr_5m * 1.5
         tp = entry_price - atr_1h * atr_tp_mult
-        if sl - entry_price < atr_1h * 0.5:
-            sl = entry_price + atr_1h * 0.5
+        if sl - entry_price < sl_min:
+            sl = entry_price + sl_min
         if tp >= sl or tp >= entry_price:
             tp = entry_price - atr_1h * atr_tp_mult
     else:
@@ -863,7 +886,11 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     sl_dist = abs(entry_price - sl)
     tp_dist = abs(tp - entry_price)
     rr = tp_dist / sl_dist if sl_dist > 0 else 0
-    alert.meta["rr"] = f"{rr:.1f}:1"
+    # RR 上限标注: 超3 提示低胜率 (RR虚高不可达)
+    if rr > 3.0:
+        alert.meta["rr"] = f"3.0+:1(低胜率)"
+    else:
+        alert.meta["rr"] = f"{rr:.1f}:1"
 
     # ── 最优入场 ──
     opt_entry_price = None
@@ -889,14 +916,17 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
                 if opt_tp < opt_entry_price and opt_sl > opt_entry_price:
                     opt_rr_val = (opt_entry_price - opt_tp) / (opt_sl - opt_entry_price)
 
-        if (opt_entry_price and abs(opt_entry_price - entry_price) <= atr_1h * 2
-                and opt_rr_val > rr and opt_rr_val >= 2.0):
+        opt_dist_atr = abs(opt_entry_price - entry_price) / max(atr_1h, 1e-9) if opt_entry_price else 99
+        # 只建议近防线挂单 (≤0.5×1H ATR 等得到) — 远防线不显示挂单 (现价入场即可)
+        if (opt_entry_price and opt_dist_atr <= 0.5
+                and opt_rr_val > rr and opt_rr_val >= 1.2):
             alert.meta["opt_entry"] = fmt_price(opt_entry_price, atr_1h)
             alert.meta["opt_rr"] = f"{opt_rr_val:.1f}:1"
+            alert.meta["opt_dist"] = f"{opt_dist_atr:.1f}ATR"
             if touches >= 3:
-                check.append("🔵左侧挂单")
+                check.append("🔵左侧挂单(近)")
             elif touches >= 2:
-                check.append("🟡右侧等K@防线")
+                check.append("🟡右侧等K@防线(近)")
             else:
                 check.append("⚠防线弱·RR高")
 
