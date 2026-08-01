@@ -13,3 +13,8 @@ docs/COACHING_*.md
 docs/ORDERBOOK_*.md
 docs/SCENARIO_*.md
 docs/MULTIPLIER_*.md
+
+# sqlite WAL 临时文件
+data/*.db-shm
+data/*.db-wal
+logs/*.out
