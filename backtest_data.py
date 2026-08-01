@@ -11,6 +11,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
+import pandas as pd
 import requests
 
 DB_PATH = "data/backtest.db"
@@ -114,11 +115,13 @@ def main():
         for tf in timeframes:
             if not args.force:
                 row = conn.execute(
-                    "SELECT COUNT(*) FROM candles WHERE symbol=? AND timeframe=?",
+                    "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM candles WHERE symbol=? AND timeframe=?",
                     (sym, tf)).fetchone()
-                if row[0] > 1000:
-                    print(f"{sym} {tf}: skip ({row[0]} bars already)")
-                    continue
+                if row[0] > 1000 and row[2] and row[1]:
+                    covered_days = (pd.Timestamp(row[2]) - pd.Timestamp(row[1])).days
+                    if covered_days >= args.days:
+                        print(f"{sym} {tf}: skip ({row[0]} bars, {covered_days}d)")
+                        continue
             try:
                 bars = fetch_5m_history(sym, tf, args.days)
                 if not bars:
