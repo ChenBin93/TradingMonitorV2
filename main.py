@@ -969,14 +969,14 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
         except Exception:
             pass
 
-    # ── 仓位参考: 1×1H ATR 标准距离, 1%本金风险 ──
+    # ── 仓位参考: 1%本金风险 / 实际止损距离 (3年: 与SL匹配, 小目标仓位自动放大) ──
     try:
         risk_pct = 1
         leverage = 10
-        risk_dist = atr_1h * 1.0
+        risk_dist = sl_dist if sl_dist > 0 else atr_1h * 1.0
         if entry_price > 0 and risk_dist > 0:
             pos_pct = entry_price * risk_pct / (risk_dist * leverage)
-            alert.meta["margin"] = f"参考{pos_pct:.0f}%({leverage}x 1ATR)" if pos_pct <= 100 else f"⚠波大参考{pos_pct:.0f}%"
+            alert.meta["margin"] = f"参考{pos_pct:.0f}%({leverage}x {risk_dist/atr_1h:.1f}ATR)" if pos_pct <= 100 else f"⚠波大参考{pos_pct:.0f}%"
     except Exception:
         pass
 
