@@ -40,7 +40,7 @@ def is_tradable_regime(regime: str) -> bool:
 
 # 场景 → (标签, 3年胜率区间, 按TP增大趋势)
 SCENE_WR = {
-    "episode_long":   ("顺日逆时多",  "55-58%"),
+    "episode_long":   ("顺日逆时多",  "55-57%"),
     "episode_short":  ("顺日逆时空",  "57-61%"),
     "follow_long":    ("顺势多",  "53-55%"),
     "follow_short":   ("顺势空",  "54-57%"),

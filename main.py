@@ -410,7 +410,10 @@ def fmt_short_alert(a: Alert) -> str:
     scene = m.get("scene", "")
     scene_str = f" {scene}" if scene else ""
 
-    line = f"▸ {icon} {sym} {d} {a.name}{persist}{bias_str}{scene_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
+    # ── 4大币 5M反转K执行状态 ──
+    exec_str = f" [5M{m.get('exec', '')}]" if m.get("exec") else ""
+
+    line = f"▸ {icon} {sym} {d} {a.name}{persist}{bias_str}{scene_str}{exec_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
     line2 = f"    S:{s} R:{r}  |  {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
@@ -1016,6 +1019,25 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             alert.severity = "critical"
             alert.details["setup"] = True
             check.append("✅成型·Pinbar")
+
+    # ── 4大币 5M反转K执行确认 (3年5M验证: 仅BTC/ETH/SOL/BNB +2.4pp, 其余币无效) ──
+    if sym in ("BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"):
+        body_dir_5m = ind_5m.get("body_dir")
+        body_pct_5m = ind_5m.get("body_pct", 0)
+        pinbar_5m = ind_5m.get("pinbar")
+        want_bear = alert.direction == "short"
+        rev_ok = False
+        if want_bear:
+            rev_ok = (pinbar_5m == "bearish") or (body_dir_5m == "bearish" and body_pct_5m >= 0.6)
+        else:
+            rev_ok = (pinbar_5m == "bullish") or (body_dir_5m == "bullish" and body_pct_5m >= 0.6)
+        if rev_ok:
+            check.append("✅5M反转K确认")
+            alert.meta["exec"] = "5M已确认"
+            alert.confidence = min(alert.confidence * 1.04, 1.0)
+        else:
+            check.append("⏳等5M反转K")
+            alert.meta["exec"] = "等5M反转K"
 
     # ── 多周期 RS 独立评分 ──
     rs_dict = alert.details.get("rs_scores", {})
