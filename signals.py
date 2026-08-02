@@ -36,6 +36,108 @@ def _sr_df(state: SignalState):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 1H 多根形态识别 (3年验证: 顺大环境 +4~7pp, 熊旗+日线空=61.4%)
+# ═══════════════════════════════════════════════════════════════════════
+
+def detect_1h_patterns(df_1h, atr_1h) -> list[str]:
+    """检测 1H 层经典形态: 双顶/双底/三推/熊旗/牛旗
+    返回形态名列表 (仅作方向辅助标记, 非独立信号)
+    阈值从紧 (宁漏报不误报): 间隔≥5, 高度差≤0.25ATR, 颈线≥0.5ATR
+    """
+    if df_1h is None or len(df_1h) < 30 or atr_1h is None or atr_1h <= 0:
+        return []
+    tdf = df_1h.tail(60).reset_index(drop=True)
+    o = tdf["open"].values
+    h = tdf["high"].values
+    l = tdf["low"].values
+    c = tdf["close"].values
+    n = len(tdf)
+    pats = []
+
+    sw_hi = [(i, h[i]) for i in range(2, n-2) if h[i] >= max(h[i-2:i+3])]
+    sw_lo = [(i, l[i]) for i in range(2, n-2) if l[i] <= min(l[i-2:i+3])]
+    tol = atr_1h * 0.25
+
+    # ── 双顶 (做空): 两高点接近 + 跌破颈线 ──
+    for a_idx in range(len(sw_hi) - 1):
+        i1, p1 = sw_hi[a_idx]
+        i2, p2 = sw_hi[a_idx + 1]
+        if not (5 <= i2 - i1 <= 40) or i2 >= n - 3:
+            continue
+        if abs(p1 - p2) > tol:
+            continue
+        neck = min(l[i1:i2 + 1])
+        if p1 - neck < atr_1h * 0.5:
+            continue
+        if c[-1] < neck:
+            pats.append("双顶")
+            break
+
+    # ── 双底 (做多): 对称 ──
+    for a_idx in range(len(sw_lo) - 1):
+        i1, p1 = sw_lo[a_idx]
+        i2, p2 = sw_lo[a_idx + 1]
+        if not (5 <= i2 - i1 <= 40) or i2 >= n - 3:
+            continue
+        if abs(p1 - p2) > tol:
+            continue
+        neck = max(h[i1:i2 + 1])
+        if neck - p1 < atr_1h * 0.5:
+            continue
+        if c[-1] > neck:
+            pats.append("双底")
+            break
+
+    # ── 三推 (做空): 三个接近高点, 第三推后破第二推低点 ──
+    for a_idx in range(len(sw_hi) - 2):
+        i1, p1 = sw_hi[a_idx]
+        i2, p2 = sw_hi[a_idx + 1]
+        i3, p3 = sw_hi[a_idx + 2]
+        if not (5 <= i2 - i1 <= 25 and 5 <= i3 - i2 <= 25) or i3 >= n - 3:
+            continue
+        if abs(p1-p2) > tol or abs(p2-p3) > tol:
+            continue
+        pull = min(l[i2:i3 + 1])
+        if c[-1] < pull:
+            pats.append("三推")
+            break
+
+    # ── 熊旗 (做空): 旗杆(5根跌>2ATR) + 旗面横盘 + 破下沿 ──
+    for i in range(max(5, n - 30), n - 8):
+        if c[i-5] - c[i] >= 2.0 * atr_1h:
+            for f in range(3, 12):
+                seg_h = h[i+1:i+f+1]
+                seg_l = l[i+1:i+f+1]
+                if len(seg_h) < 3:
+                    break
+                if max(seg_h) - min(seg_l) > 0.8 * atr_1h:
+                    break
+                bot = min(seg_l)
+                if c[-1] < bot:
+                    pats.append("熊旗")
+                    break
+            break
+
+    # ── 牛旗 (做多): 对称 ──
+    for i in range(max(5, n - 30), n - 8):
+        if c[i] - c[i-5] >= 2.0 * atr_1h:
+            for f in range(3, 12):
+                seg_h = h[i+1:i+f+1]
+                seg_l = l[i+1:i+f+1]
+                if len(seg_h) < 3:
+                    break
+                if max(seg_h) - min(seg_l) > 0.8 * atr_1h:
+                    break
+                top = max(seg_h)
+                if c[-1] > top:
+                    pats.append("牛旗")
+                    break
+            break
+
+    return pats
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # S/R 结构信号 (用 1H S/R, 5m 入场)
 # ═══════════════════════════════════════════════════════════════════════
 

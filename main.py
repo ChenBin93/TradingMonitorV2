@@ -1023,6 +1023,20 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             alert.details["setup"] = True
             check.append("✅成型·Pinbar")
 
+    # ── 深回调提示 (3年验证: 4H深度>2ATR 的插曲做多更优 55.2% vs 浅回调 54.2%) ──
+    try:
+        close_4h_v = ind_4h.get("close")
+        ma20_4h_v = ind_4h.get("ma20")
+        atr_4h_v = ind_4h.get("atr") or 1
+        scene_now = alert.details.get("scene", "neutral")
+        if scene_now in ("episode_long", "episode_short") and close_4h_v and ma20_4h_v and atr_4h_v > 0:
+            dev_4h = abs(close_4h_v - ma20_4h_v) / atr_4h_v
+            if dev_4h >= 1.5:
+                check.append(f"✓深回调{dev_4h:.1f}ATR")
+                alert.confidence = min(alert.confidence * 1.03, 1.0)
+    except Exception:
+        pass
+
     # ── 4大币 5M反转K执行确认 (3年5M验证: 仅BTC/ETH/SOL/BNB +2.4pp, 其余币无效) ──
     if sym in ("BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "BNB/USDT:USDT"):
         body_dir_5m = ind_5m.get("body_dir")
