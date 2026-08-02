@@ -11,7 +11,7 @@
 import numpy as np
 import pandas as pd
 
-WINDOW = 90  # 用户经验: 往前看不超过 80-100 根
+WINDOW = 50  # 用户经验: 往前看不超过 80-100 根; 调优(43章)显示 50-150 效果相同, 取小窗口更灵敏
 
 # 阶段阈值
 EARLY_DEV = 0.6       # |偏离| < 0.6 ATR 且刚启动 → 初期
@@ -141,8 +141,10 @@ def analyze_market_state(df: pd.DataFrame, window: int = WINDOW) -> dict:
         return _empty()
 
     ma20 = pd.Series(c).rolling(20).mean().values
-    ma60 = pd.Series(c).rolling(60).mean().values
-    ma60_now = ma60[-1] if not np.isnan(ma60[-1]) else ma20[-1]  # 小窗口时 MA60 退化为 MA20
+    # MA60 从小窗口退化 — 从完整历史计算 (窗口小=灵敏, 但 MA60 仍要足够历史)
+    full_c = df["close"].values
+    ma60_tail = pd.Series(full_c).rolling(60).mean().values[-window:]
+    ma60_now = ma60_tail[-1] if len(ma60_tail) and not np.isnan(ma60_tail[-1]) else ma20[-1]
 
     dev = (c[-1] - ma20[-1]) / atr_now
     slope = (ma20[-1] - ma20[-11]) / atr_now
