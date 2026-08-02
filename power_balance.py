@@ -16,18 +16,49 @@ SHIFT_WINDOW = 10      # 变化对比窗口 (后10 vs 前10)
 
 
 def _atr(df: pd.DataFrame) -> float:
-    h, l, c = df["high"].values, df["low"].values, df["close"].values
+    """ATR (近14根均值) — 全向量化"""
+    h = df["high"].values
+    l = df["low"].values
+    c = df["close"].values
     n = len(df)
     if n < 2:
         return 0.0
     tr = np.zeros(n)
-    for i in range(1, n):
-        tr[i] = max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1]))
+    tr[1:] = np.maximum(h[1:] - l[1:],
+                        np.maximum(np.abs(h[1:] - c[:-1]), np.abs(l[1:] - c[:-1])))
     return float(np.mean(tr[-14:]))
 
 
-def _power_score(tail: pd.DataFrame, atr: float) -> float:
-    """近窗口多空力量评分 (-100~+100)"""
+def score_from_components(bull_body, bear_body, bull_wick, bear_wick,
+                          bull_vol, bear_vol, atr, h5, l5, h6, l6) -> float:
+    """力量评分核心 — 纯函数 (analyze_power 与预计算调优共用)"""
+    if atr <= 0:
+        return 0.0
+    net_body = (bull_body - bear_body) / atr
+    s_body = float(np.clip(net_body * 12, -100, 100))
+    net_wick = (bull_wick - bear_wick) / atr
+    s_wick = float(np.clip(net_wick * 15, -100, 100))
+    tot_v = bull_vol + bear_vol
+    s_vol = (bull_vol / tot_v - 0.5) * 200 if tot_v > 0 else 0.0
+    hh = h5 > h6
+    hl = l5 > l6
+    if hh and hl:
+        s_struct = 100
+    elif hh:
+        s_struct = 40
+    elif hl:
+        s_struct = 20
+    elif h5 < h6 and l5 < l6:
+        s_struct = -100
+    else:
+        s_struct = -60
+    score = 0.35 * s_body + 0.15 * s_wick + 0.25 * s_vol + 0.25 * s_struct
+    return float(np.clip(score, -100, 100))
+
+
+def _power_score(tail: pd.DataFrame, atr: float, power_window: int = POWER_WINDOW) -> float:
+    """近窗口多空力量评分 (-100~+100) — 全向量化"""
+    tail = tail.tail(power_window)
     o = tail["open"].values
     h = tail["high"].values
     l = tail["low"].values
@@ -37,75 +68,41 @@ def _power_score(tail: pd.DataFrame, atr: float) -> float:
     if n < 5 or atr <= 0:
         return 0.0
 
-    bull_body = bear_body = 0.0
-    bull_vol = bear_vol = 0.0
-    bull_wick = bear_wick = 0.0
-    for i in range(n):
-        body = c[i] - o[i]
-        rng = h[i] - l[i]
-        if body > 0:
-            bull_body += body
-            bull_vol += v[i]
-            bull_wick += max(0, h[i] - c[i])      # 阳线上影 = 空头打压
-        elif body < 0:
-            bear_body += -body
-            bear_vol += v[i]
-            bear_wick += max(0, o[i] - l[i])      # 阴线下影 = 多头抵抗
-
-    # 1. 实体力量 (35%) — 净实体 / ATR, 归一化
-    net_body = (bull_body - bear_body) / atr
-    s_body = np.clip(net_body * 12, -100, 100)
-
-    # 2. 影线对抗 (15%) — 多头抵抗 vs 空头打压
-    net_wick = (bull_wick - bear_wick) / atr
-    s_wick = np.clip(net_wick * 15, -100, 100)
-
-    # 3. 量能方向 (25%) — 阳线量占比
-    tot_v = bull_vol + bear_vol
-    if tot_v > 0:
-        s_vol = (bull_vol / tot_v - 0.5) * 200
-    else:
-        s_vol = 0.0
-
-    # 4. 结构推进 (25%) — 高低点推进方向
-    # 近5根高点/低点 vs 前5根 (HH/HL 多, LH/LL 空)
-    if n >= 12:
-        hh = h[-1] > h[-6]       # 高点抬高
-        hl = l[-1] > l[-6]       # 低点抬高
-        if hh and hl:
-            s_struct = 100
-        elif hh:
-            s_struct = 40
-        elif hl:
-            s_struct = 20
-        elif not hh and not hl and h[-1] < h[-6] and l[-1] < l[-6]:
-            s_struct = -100
-        elif not hh and not hl:
-            s_struct = -60
-        else:
-            s_struct = -20
-    else:
-        s_struct = 0.0
-
-    score = 0.35 * s_body + 0.15 * s_wick + 0.25 * s_vol + 0.25 * s_struct
-    return float(np.clip(score, -100, 100))
+    body = c - o
+    bull = body > 0
+    bear = body < 0
+    bull_body = float(np.sum(body[bull]))
+    bear_body = float(-np.sum(body[bear]))
+    upper_wick = np.maximum(0, h - c)
+    lower_wick = np.maximum(0, o - l)
+    bull_wick = float(np.sum(upper_wick[bull]))
+    bear_wick = float(np.sum(lower_wick[bear]))
+    bull_vol = float(np.sum(v[bull]))
+    bear_vol = float(np.sum(v[bear]))
+    h5 = h[-1] if n >= 6 else h[-1]
+    l5 = l[-1] if n >= 6 else l[-1]
+    h6 = h[-6] if n >= 6 else h[-1]
+    l6 = l[-6] if n >= 6 else l[-1]
+    return score_from_components(bull_body, bear_body, bull_wick, bear_wick,
+                                 bull_vol, bear_vol, atr, h5, l5, h6, l6)
 
 
-def analyze_power(df: pd.DataFrame) -> dict:
+def analyze_power(df: pd.DataFrame, power_window: int = POWER_WINDOW,
+                  shift_window: int = SHIFT_WINDOW) -> dict:
     """多空力量识别 — 输入 K 线 DataFrame
     返回: score(-100~+100) + shift(增强/减弱/持平) + 明细
     """
-    if df is None or len(df) < 60:
+    if df is None or len(df) < power_window + shift_window * 2 + 5:
         return {"score": 0, "shift": "unknown", "bull": 0, "bear": 0, "reason": ""}
 
     atr = _atr(df)
-    tail = df.tail(POWER_WINDOW).reset_index(drop=True)
-    score = _power_score(tail, atr)
+    tail = df.tail(power_window).reset_index(drop=True)
+    score = _power_score(tail, atr, power_window)
 
-    # 变化: 后10根 vs 前10根
-    if len(tail) >= 20:
-        prev_score = _power_score(tail.iloc[:-10], atr)
-        cur_score = _power_score(tail.iloc[-10:], atr)
+    # 变化: 后shift_window根 vs 前shift_window根
+    if len(tail) >= shift_window * 2:
+        prev_score = _power_score(tail.iloc[:-shift_window], atr, shift_window)
+        cur_score = _power_score(tail.iloc[-shift_window:], atr, shift_window)
         delta = cur_score - prev_score
         if delta >= 20:
             shift = "strengthening"

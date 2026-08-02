@@ -53,12 +53,23 @@ def _find_swing_levels_memo(df, lookback: int = 50):
 # 数据加载
 # ═══════════════════════════════════════════════════════════════════
 
-def load_all(db_path: str = "data/backtest.db") -> dict[str, dict[str, pd.DataFrame]]:
-    """{symbol: {tf: DataFrame}} — 按时间排序"""
+def load_all(db_path: str = "data/backtest.db", timeframes: list[str] | None = None) -> dict[str, dict[str, pd.DataFrame]]:
+    """{symbol: {tf: DataFrame}} — 按时间排序
+
+    timeframes: 只读指定周期 (如 ['1h','4h']) — 避免 5M 全量读取 (700万行, 276s)
+    大多数分析只需 1H/4H, 不传则读全部。
+    """
     conn = sqlite3.connect(db_path)
     data: dict[str, dict[str, pd.DataFrame]] = {}
-    for sym, tf, ts, o, h, l, c, v in conn.execute(
-            "SELECT symbol, timeframe, timestamp, open, high, low, close, volume FROM candles ORDER BY timestamp"):
+    if timeframes:
+        ph = ",".join("?" * len(timeframes))
+        rows = conn.execute(
+            f"SELECT symbol, timeframe, timestamp, open, high, low, close, volume "
+            f"FROM candles WHERE timeframe IN ({ph}) ORDER BY timestamp", timeframes)
+    else:
+        rows = conn.execute(
+            "SELECT symbol, timeframe, timestamp, open, high, low, close, volume FROM candles ORDER BY timestamp")
+    for sym, tf, ts, o, h, l, c, v in rows:
         sym_data = data.setdefault(sym, {})
         tf_data = sym_data.setdefault(tf, {"timestamp": [], "open": [], "high": [],
                                            "low": [], "close": [], "volume": []})
