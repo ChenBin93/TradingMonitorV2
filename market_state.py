@@ -111,6 +111,10 @@ def _empty_state(desc: str) -> dict:
 def compute_market_state(tf_ind: dict) -> dict:
     """从全量指标池生成市场状态报告, 聚焦 BTC 做风向标"""
     from support_resistance import find_swing_levels, get_nearest_levels
+    from market_phase import analyze_market_state as _phase
+    from market_phase import label_of as _phase_label
+    from power_balance import analyze_power as _power
+    from power_balance import label_of as _power_label
     from utils import fmt_price
 
     btc_key = "BTC/USDT:USDT"
@@ -174,6 +178,41 @@ def compute_market_state(tf_ind: dict) -> dict:
         trend_4h = f"4H偏空(ADX{adx_4h:.0f})"
     else:
         trend_4h = f"4H中性(ADX{adx_4h:.0f})"
+
+    # ── 市场状态递进分析 (用户方法论: 日线→4H→1H, 每周期看90根) ──
+    phase_line = ""
+    power_line = ""
+    try:
+        df_4h = ind_4h.get("df")
+        df_1h = ind_1h.get("df")
+        parts_phase = []
+        if df_4h is not None and len(df_4h) >= 90:
+            # 日线 (4H 合成) — live df 是 RangeIndex, 需要 timestamp 建索引
+            daily_df = None
+            try:
+                tmp = df_4h.copy()
+                if "timestamp" in tmp.columns:
+                    tmp.index = pd.to_datetime(tmp["timestamp"])
+                daily_df = tmp.resample("1D").agg(
+                    {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+                ).dropna()
+            except Exception:
+                daily_df = None
+            if daily_df is not None and len(daily_df) >= 70:
+                ms_d = _phase(daily_df)
+                parts_phase.append(f"日线:{_phase_label(ms_d)}")
+            ms_4h = _phase(df_4h.tail(90).reset_index(drop=True))
+            parts_phase.append(f"4H:{_phase_label(ms_4h)}")
+            pw_4h = _power(df_4h.tail(60).reset_index(drop=True))
+            power_line = f"4H力量:{_power_label(pw_4h)}"
+        if df_1h is not None and len(df_1h) >= 90:
+            ms_1h = _phase(df_1h.tail(90).reset_index(drop=True))
+            parts_phase.append(f"1H:{_phase_label(ms_1h)}")
+            pw_1h = _power(df_1h.tail(60).reset_index(drop=True))
+            power_line += f" 1H力量:{_power_label(pw_1h)}" if power_line else f"1H力量:{_power_label(pw_1h)}"
+        phase_line = " · ".join(parts_phase)
+    except Exception:
+        phase_line = ""
 
     # ── 1H S/R 位 ──
     sr_1h_str = ""
@@ -330,6 +369,8 @@ def compute_market_state(tf_ind: dict) -> dict:
         "reason": bias_reason,
         "sr_1h": sr_1h_str,
         "sr_4h": sr_4h_str,
+        "phase_line": phase_line,
+        "power_line": power_line,
         "breadth_1h": breadth_1h,
         "breadth_4h": breadth_4h,
         "btc_price": btc_price,

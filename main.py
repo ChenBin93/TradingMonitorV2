@@ -413,7 +413,10 @@ def fmt_short_alert(a: Alert) -> str:
     # ── 4大币 5M反转K执行状态 ──
     exec_str = f" [5M{m.get('exec', '')}]" if m.get("exec") else ""
 
-    line = f"▸ {icon} {sym} {d} {a.name}{persist}{bias_str}{scene_str}{exec_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}"
+    # ── 多空力量 (用户方法论: 机会前提) ──
+    power_str = f" ⚔{m['power']}" if m.get("power") else ""
+
+    line = f"▸ {icon} {sym} {d} {a.name}{persist}{bias_str}{scene_str}{exec_str}  RR:{rr}  {stars}{entry_timer}{pos_hint}{margin_str}{rs_str}{power_str}"
     line2 = f"    S:{s} R:{r}  |  {checks}"
     opt_entry = m.get("opt_entry", "")
     opt_rr = m.get("opt_rr", "")
@@ -1135,6 +1138,40 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             else:
                 alert.meta["tp_full"] = f"{fmt_price(tp, atr_1h)}(70%)"
 
+    # ── 多空力量识别 (3年验证: 插曲环境+力量同向极端 = +2.5pp 59.6%) ──
+    # 用户方法论: 观察近期多空力量对比及优势方变化, 为机会点提前准备
+    try:
+        from power_balance import analyze_power as _pw
+        df_1h_pw = (ind_1h or {}).get("df")
+        if df_1h_pw is not None and len(df_1h_pw) >= 60:
+            pw = _pw(df_1h_pw.tail(60).reset_index(drop=True))
+            pw_score = pw.get("score", 0)
+            alert.meta["power"] = pw.get("reason", "")
+            scene_now = alert.details.get("scene", "neutral")
+            # 插曲 + 力量同向极端 → 回调结束确认 (59.6% 3年)
+            if scene_now == "episode_long" and pw_score > 40:
+                check.append("✓力量转多")
+                alert.confidence = min(alert.confidence * 1.05, 1.0)
+            elif scene_now == "episode_short" and pw_score < -40:
+                check.append("✓力量转空")
+                alert.confidence = min(alert.confidence * 1.05, 1.0)
+            # 力量反向极端: 优势方拐点提示 (展示辅助, 不加降权)
+            elif scene_now == "episode_long" and pw_score < -60:
+                check.append("⚠力量仍空")
+            elif scene_now == "episode_short" and pw_score > 60:
+                check.append("⚠力量仍多")
+            # 趋势末期提示 (反转风险预警)
+            try:
+                from market_phase import analyze_market_state as _phase
+                ms_1h_p = _phase(df_1h_pw.tail(90).reset_index(drop=True))
+                if ms_1h_p.get("stage") == "late" and ms_1h_p.get("state", "").startswith("trend"):
+                    check.append("⚠1H趋势末期")
+                    alert.meta["phase"] = ms_1h_p.get("reason", "")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     # ── 拥挤度 ──
     funding = alert.details.get("btc_funding")
     if funding is not None:
@@ -1398,6 +1435,10 @@ async def async_main():
 
             ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()} ━━━\n"
             ms_line += f"{ms['desc']}\n"
+            if ms.get("phase_line"):
+                ms_line += f"{ms['phase_line']}\n"
+            if ms.get("power_line"):
+                ms_line += f"{ms['power_line']}\n"
             ms_line += f"{ms['h1_line']}"
             if ms.get("ma20_line"):
                 ms_line += f"\n距MA20: {ms['ma20_line']}"
