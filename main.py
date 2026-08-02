@@ -1163,7 +1163,7 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             # 趋势末期提示 (反转风险预警)
             try:
                 from market_phase import analyze_market_state as _phase, WINDOW as _PW
-                ms_1h_p = _phase(df_1h_pw.tail(_PW).reset_index(drop=True))
+                ms_1h_p = _phase(df_1h_pw.tail(_PW + 70).reset_index(drop=True))
                 if ms_1h_p.get("stage") == "late" and ms_1h_p.get("state", "").startswith("trend"):
                     check.append("⚠1H趋势末期")
                     alert.meta["phase"] = ms_1h_p.get("reason", "")

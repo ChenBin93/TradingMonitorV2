@@ -124,27 +124,28 @@ def classify(atr_now: float, adx_now: float, adx_prev: float, slope: float,
 
 
 def analyze_market_state(df: pd.DataFrame, window: int = WINDOW) -> dict:
-    """单周期市场状态分析 — 输入 K 线 DataFrame (≥80根)
+    """单周期市场状态分析 — 输入 K 线 DataFrame (建议 ≥ window+60 根)
+
+    设计 (44章修正): 指标 (ATR/ADX/MA) 用完整历史计算保证 ewm 收敛,
+    window 只控制判定关注范围 (body动能等) — 小窗口灵敏, 指标始终可靠。
     返回: state(趋势/震荡/转换) + stage(初期/加速/末期) + 指标明细
     """
-    if df is None or len(df) < 70:
+    if df is None or len(df) < window + 30:
         return _empty()
-    tail = df.tail(window).reset_index(drop=True)
-    c = tail["close"].values
-    o = tail["open"].values
+    c = df["close"].values
+    o = df["open"].values
     n = len(c)
 
-    atr = _atr_series(tail)
-    adx = _adx_series(tail)
+    # 指标: 全量历史 (收敛)
+    atr = _atr_series(df)
+    adx = _adx_series(df)
     atr_now = atr[-1]
     if atr_now <= 1e-9:
         return _empty()
 
     ma20 = pd.Series(c).rolling(20).mean().values
-    # MA60 从小窗口退化 — 从完整历史计算 (窗口小=灵敏, 但 MA60 仍要足够历史)
-    full_c = df["close"].values
-    ma60_tail = pd.Series(full_c).rolling(60).mean().values[-window:]
-    ma60_now = ma60_tail[-1] if len(ma60_tail) and not np.isnan(ma60_tail[-1]) else ma20[-1]
+    ma60 = pd.Series(c).rolling(60).mean().values
+    ma60_now = ma60[-1] if not np.isnan(ma60[-1]) else ma20[-1]
 
     dev = (c[-1] - ma20[-1]) / atr_now
     slope = (ma20[-1] - ma20[-11]) / atr_now
@@ -153,6 +154,7 @@ def analyze_market_state(df: pd.DataFrame, window: int = WINDOW) -> dict:
     adx_now = adx[-1]
     adx_prev = adx[-11] if n > 11 else adx_now
 
+    # 判定关注范围: 近 window 根的 body 动能
     body = np.abs(c - o)
     body_recent = np.mean(body[-3:]) if n >= 3 else 0
     body_prior = np.mean(body[-13:-3]) if n >= 13 else body_recent

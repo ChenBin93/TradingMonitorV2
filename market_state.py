@@ -201,12 +201,12 @@ def compute_market_state(tf_ind: dict) -> dict:
             if daily_df is not None and len(daily_df) >= 70:
                 ms_d = _phase(daily_df)
                 parts_phase.append(f"日线:{_phase_label(ms_d)}")
-            ms_4h = _phase(df_4h.tail(_PW).reset_index(drop=True))
+            ms_4h = _phase(df_4h.tail(_PW + 70).reset_index(drop=True))
             parts_phase.append(f"4H:{_phase_label(ms_4h)}")
             pw_4h = _power(df_4h.tail(60).reset_index(drop=True))
             power_line = f"4H力量:{_power_label(pw_4h)}"
         if df_1h is not None and len(df_1h) >= 90:
-            ms_1h = _phase(df_1h.tail(_PW).reset_index(drop=True))
+            ms_1h = _phase(df_1h.tail(_PW + 70).reset_index(drop=True))
             parts_phase.append(f"1H:{_phase_label(ms_1h)}")
             pw_1h = _power(df_1h.tail(60).reset_index(drop=True))
             power_line += f" 1H力量:{_power_label(pw_1h)}" if power_line else f"1H力量:{_power_label(pw_1h)}"
