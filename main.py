@@ -1023,6 +1023,26 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
             alert.details["setup"] = True
             check.append("✅成型·Pinbar")
 
+    # ── 波动状态 × 插曲 (3年20标的验证: 高波动插曲 62.7% / 常态 56.3% / 低波动 53.4%) ──
+    # atr_ratio = 当前1H ATR / 过去90根均值
+    try:
+        df_1h_v = (ind_1h or {}).get("df")
+        scene_now = alert.details.get("scene", "neutral")
+        if scene_now in ("episode_long", "episode_short") and df_1h_v is not None and len(df_1h_v) >= 95:
+            from market_phase import _atr_series as _atr_s
+            atr_v = _atr_s(df_1h_v.tail(95).reset_index(drop=True))
+            if len(atr_v) > 90 and atr_v[-1] > 0:
+                atr_ma_v = float(np.mean(atr_v[-91:-1]))
+                atr_ratio = atr_v[-1] / atr_ma_v if atr_ma_v > 0 else 1.0
+                if atr_ratio >= 1.3:
+                    check.append(f"✓高波动插曲 {atr_ratio:.1f}x")
+                    alert.confidence = min(alert.confidence * 1.05, 1.0)
+                elif atr_ratio < 0.7:
+                    check.append(f"⚠低波动插曲 {atr_ratio:.1f}x")
+                    alert.confidence = min(alert.confidence * 0.95, 1.0)
+    except Exception:
+        pass
+
     # ── 深回调提示 (3年验证: 4H深度>2ATR 的插曲做多更优 55.2% vs 浅回调 54.2%) ──
     try:
         close_4h_v = ind_4h.get("close")

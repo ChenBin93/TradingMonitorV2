@@ -1,0 +1,33 @@
+/root/workspace/project/TradingMonitor/v2/research/scripts/vol_state.py:45: RuntimeWarning: invalid value encountered in divide
+  atr_ratio = atr1 / np.where(atr_ma > 0, atr_ma, atr1)
+═══ A. 无条件: 波动状态 × 双向 1:1 ═══
+
+无条件(双向) (TP=1.0/SL=1.0/W=24)
+波动状态            n       胜率
+低波动          1415    48.6%
+常态           5674    50.5%
+高波动          1495    50.1%
+
+═══ B. 插曲环境 (日线顺势+4H逆) ═══
+
+插曲 (沿日线方向) (TP=1.0/SL=1.0/W=24)
+波动状态            n       胜率
+低波动           538    55.6%
+常态           1802    55.9%
+高波动           265    67.9%
+
+═══ C. BB反转事件 (日线空/中性 + 1H BB上轨破轨) ═══
+
+BB反转 (47 事件) (TP=0.5/SL=0.5/W=48)
+波动状态            n       胜率
+低波动            12 样本不足
+常态             30 样本不足
+高波动             5 样本不足
+
+═══ D. 4H 波动分档 × 插曲 1:1 ═══
+
+4H波动×插曲 (TP=1.0/SL=1.0/W=24)
+波动状态            n       胜率
+低波动            76 样本不足
+常态           1171    57.3%
+高波动            67 样本不足
