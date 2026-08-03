@@ -1,0 +1,39 @@
+BTC/USDT:USDT: 1957
+ETH/USDT:USDT: 4046
+SOL/USDT:USDT: 6215
+BNB/USDT:USDT: 8324
+XRP/USDT:USDT: 10445
+DOGE/USDT:USDT: 12583
+ADA/USDT:USDT: 14608
+AVAX/USDT:USDT: 16650
+LINK/USDT:USDT: 18720
+DOT/USDT:USDT: 20719
+LTC/USDT:USDT: 22933
+BCH/USDT:USDT: 25085
+NEAR/USDT:USDT: 27100
+OP/USDT:USDT: 29126
+ARB/USDT:USDT: 31263
+ATOM/USDT:USDT: 33275
+SUI/USDT:USDT: 35410
+UNI/USDT:USDT: 37521
+TIA/USDT:USDT: 39297
+INJ/USDT:USDT: 41099
+
+插曲样本: 41099
+基线胜率: 56.4%
+
+═══ 上升趋势线 (做多) ═══
+贴上升趋势线 (0<=dist<0.5ATR)                        n=   393 胜率= 48.9% Δ= -7.6pp
+接近趋势线 (0.5-1.0)                                n=   37 样本不足
+远离趋势线 (>1.5)                                   n=   52 样本不足
+已跌破趋势线 (dist<0)                                n=  1401 胜率= 54.7% Δ= -1.7pp
+
+═══ 下降趋势线 (做空) ═══
+贴下降趋势线 (0<=dist<0.5ATR)                        n=   550 胜率= 54.4% Δ= -2.0pp
+接近趋势线 (0.5-1.0)                                n=   42 样本不足
+远离趋势线 (>1.5)                                   n=   59 样本不足
+已突破趋势线 (dist<0)                                n=  1930 胜率= 57.2% Δ= +0.8pp
+
+═══ 与水平位对照 (参考) ═══
+上升趋势线可检测率 (做多样本): 1903/17770 = 11%
+下降趋势线可检测率 (做空样本): 2608/23329 = 11%
