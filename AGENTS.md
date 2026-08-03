@@ -23,8 +23,10 @@ TradingMonitor V2 — OKX 永续合约实时监控 + 量化研究系统。Python
 - **研究基础设施（research/，pytest 门禁）**：
   - `research/caliber.py` — 严格口径唯一来源：入场=信号 bar 收盘、对称 1:1 T×ATR、前向先碰判定、同 bar 双命中跳过、超时 expired、MIN_N=200。**研究脚本禁止硬编码口径**
   - `research/data_loader.py` — backtest.db 加载 + 完整性检查 + MTF 对齐（`align_higher`：高位 bar 必须已收盘才能用，低位 t 只能用 open+时长 ≤ t 的高位 bar）
-  - `research/outcome.py` — 双实现结果引擎：numpy 参考引擎（权威）+ vectorbt（column-per-entry 模拟，去重主单）。**vectorbt 语义坑**：sl_stop/tp_stop 是百分比非价格、跳空按开盘价成交、止损单偶发部分成交伪影——全部已被测试锁定，别改这些约定
-  - `research/tests/` — 黄金测试（手算答案）+ 未来函数不变性测试（追加 K 线特征值不许变）+ MTF 边界 + 真实数据对拍。**每次研究前必跑 `python3 -m pytest research/tests -q`（约 2 分钟），失败即停**
+  - `research/outcome.py` — 双实现结果引擎：numpy 参考引擎（权威）+ vectorbt（column-per-entry 模拟，去重主单）。**bar 内判定用 open 出发语义**（跳空按越界判定，2026-08-03 修正——旧 close 基准判定有方向偏差）。**vectorbt 语义坑**：sl_stop/tp_stop 是百分比非价格、成交时机可差 1 根、止损单偶发部分成交伪影——全部已被测试锁定，别改这些约定
+  - `research/sim_market.py` — 随机游走对照市场（真实 OHLC 子步构造）。**严禁再用 close×±2σ 简化构造**（有乘法偏差）；**策略期望必须计入 timeout 交易**（排除会虚高）
+  - `research/tests/` — 黄金测试（手算答案）+ 未来函数不变性测试 + MTF 边界 + 真实数据对拍 + **性质测试（physics checks：无信息市场 1:1 基线必须 ≈50%、多空镜像恒等式、合成市场恢复真值）**。**每次研究前必跑 `python3 -m pytest research/tests -q`（约 4 分钟），失败即停**
+  - 教训（2026-08-03 两次低级问题后确立）：①性质测试是"设计正确性"的唯一独立判据，手算答案只能验证实现与设计一致；②聚类/位带等结构检测必须在线聚类+冻结（全样本聚类=未来函数）；③任何"正期望发现"的发布门槛 = 真实 − 正确构造的随机游走基线 > 0 且分年稳定
 - 新研究流程：`research/studies/` 写脚本（docstring 写明无未来函数设计 + 预注册假设）→ 输出 `research/notes/` → 结论落地后提交（提交前缀风格: `research:` / `live:` / `fix:` / `docs:`）
 
 ## 文档

@@ -43,16 +43,13 @@ def _load(timeframes):
     return out
 
 
-def level_events(df, atr, lookback, kind):
-    """事件掩码列表 [(level, event_mask)]; kind=touch/breakout; 事件式进入"""
-    c = df["close"].values
-    h = df["high"].values
-    l = df["low"].values
+def level_events_from(ctx, lookback, kind):
+    """基于预处理 ctx 的事件掩码列表 [(level, event_mask)]"""
+    c, h, l = ctx["c"], ctx["h"], ctx["l"]
     n = len(c)
-    lvls = cluster_levels(h, l, atr, min_touch=2)
     t_arr = np.arange(n)
     out = []
-    for lv in lvls:
+    for lv in ctx["lvls"]:
         usable = (t_arr >= lv.confirm_at) & (t_arr - lv.confirm_at < lookback)
         p_lo = lv.price - lv.band
         p_hi = lv.price + lv.band
@@ -66,32 +63,56 @@ def level_events(df, atr, lookback, kind):
     return out
 
 
-def agg_outcomes(dfs, kind, lookback, direction_fn, base_long, base_short, side=None):
-    n_win = n_loss = n_expired = n_skip = 0
-    year_wl = {}
+def preprocess(dfs):
+    """聚类一次供全部调用复用 (性能关键: 12 次调用 × 40 序列的聚类开销)"""
+    out = []
     for df in dfs:
         c = df["close"].values
         h = df["high"].values
         l = df["low"].values
+        o = df["open"].values
         atr = _atr_series(df)
-        years = df.index.year.values
-        for lv, e in level_events(df, atr, lookback, kind):
+        out.append({
+            "c": c, "h": h, "l": l, "o": o, "atr": atr,
+            "years": df.index.year.values,
+            "lvls": cluster_levels(h, l, atr, min_touch=2),
+        })
+    return out
+
+
+def agg_outcomes(ctxs, kind, lookback, direction_fn, side=None):
+    n_win = n_loss = n_expired = n_skip = 0
+    year_wl = {}
+    for ctx in ctxs:
+        c, h, l, o = ctx["c"], ctx["h"], ctx["l"], ctx["o"]
+        atr, years = ctx["atr"], ctx["years"]
+        # 同方向事件合并为一次 evaluate_forward (性能: 避免每位置一次 Python 循环)
+        d = None
+        merged = np.zeros(len(c), bool)
+        for lv, e in level_events_from(ctx, lookback, kind):
             if side is not None and lv.side != side:
                 continue
-            d = direction_fn(lv)
-            if d is None:
+            dd = direction_fn(lv)
+            if dd is None:
                 continue
-            out, recs = evaluate_forward(c, h, l, atr, e, d, T, W)
-            n_win += out.n_win
-            n_loss += out.n_loss
-            n_expired += out.n_expired
-            n_skip += out.n_skip
-            for r in recs:
-                if r.outcome not in ("win", "loss"):
-                    continue
-                y = years[r.entry_idx]
-                year_wl.setdefault(y, [0, 0])
-                year_wl[y][0 if r.outcome == "win" else 1] += 1
+            if d is None:
+                d = dd
+            elif d != dd:
+                raise ValueError("合并事件方向冲突")
+            merged |= e
+        if d is None:
+            continue
+        out, recs = evaluate_forward(c, h, l, atr, merged, d, T, W, open_px=o)
+        n_win += out.n_win
+        n_loss += out.n_loss
+        n_expired += out.n_expired
+        n_skip += out.n_skip
+        for r in recs:
+            if r.outcome not in ("win", "loss"):
+                continue
+            y = years[r.entry_idx]
+            year_wl.setdefault(y, [0, 0])
+            year_wl[y][0 if r.outcome == "win" else 1] += 1
     o = Outcome(n_win, n_loss, n_expired, n_skip)
     by_year = {y: wl[0] / (wl[0] + wl[1]) for y, wl in year_wl.items() if wl[0] + wl[1] >= 100}
     return o, by_year
@@ -108,15 +129,14 @@ def print_row(label, o, base, by_year):
 def run_b1(dfs_by_tf, label_extra=""):
     for tf, dfs in dfs_by_tf.items():
         print(f"═══ {tf} {label_extra}═══\n")
+        ctxs = preprocess(dfs)
         ones = [np.ones(len(df), bool) for df in dfs]
         base_long = base_short = None
-        for df, one in zip(dfs, ones):
-            c = df["close"].values
-            h = df["high"].values
-            l = df["low"].values
-            atr = _atr_series(df)
-            o1, _ = evaluate_forward(c, h, l, atr, one, "long", T, W)
-            o2, _ = evaluate_forward(c, h, l, atr, one, "short", T, W)
+        for ctx, one in zip(ctxs, ones):
+            o1, _ = evaluate_forward(ctx["c"], ctx["h"], ctx["l"], ctx["atr"],
+                                     one, "long", T, W, open_px=ctx["o"])
+            o2, _ = evaluate_forward(ctx["c"], ctx["h"], ctx["l"], ctx["atr"],
+                                     one, "short", T, W, open_px=ctx["o"])
             if base_long is None:
                 base_long, base_short = o1, o2
             else:
@@ -130,22 +150,22 @@ def run_b1(dfs_by_tf, label_extra=""):
         for lb in LOOKBACKS:
             print(f"── S/R 回看 {lb} 根 ──")
             print("Q1 触碰后反弹方向 (支撑→做多 / 阻力→做空)")
-            o, yr = agg_outcomes(dfs, "touch", lb,
+            o, yr = agg_outcomes(ctxs, "touch", lb,
                                  lambda lv: "long" if lv.side == "support" else "short",
-                                 base_long, base_short, side="support")
+                                 side="support")
             print_row(f"支撑触碰→做多×long", o, base_long, yr)
-            o, yr = agg_outcomes(dfs, "touch", lb,
+            o, yr = agg_outcomes(ctxs, "touch", lb,
                                  lambda lv: "long" if lv.side == "support" else "short",
-                                 base_long, base_short, side="resistance")
+                                 side="resistance")
             print_row(f"阻力触碰→做空×short", o, base_short, yr)
             print("Q2 破位后延续方向 (支撑破位→做空 / 阻力破位→做多)")
-            o, yr = agg_outcomes(dfs, "breakout", lb,
+            o, yr = agg_outcomes(ctxs, "breakout", lb,
                                  lambda lv: "short" if lv.side == "support" else "long",
-                                 base_long, base_short, side="support")
+                                 side="support")
             print_row(f"支撑破位→做空×short", o, base_short, yr)
-            o, yr = agg_outcomes(dfs, "breakout", lb,
+            o, yr = agg_outcomes(ctxs, "breakout", lb,
                                  lambda lv: "short" if lv.side == "support" else "long",
-                                 base_long, base_short, side="resistance")
+                                 side="resistance")
             print_row(f"阻力破位→做多×long", o, base_long, yr)
             print()
 
@@ -154,19 +174,12 @@ def main():
     dfs_by_tf = _load(timeframes=("1h",))
     run_b1(dfs_by_tf)
     # ── 随机游走对照 ──
-    rng = np.random.default_rng(0)
+    from research.sim_market import gbm_dataframe
     ref = dfs_by_tf["1h"][0]
     n_ref = len(ref)
     sig = np.std(np.diff(np.log(ref["close"].values)))
-    rw_dfs = []
-    for _ in range(20):
-        rets = rng.normal(0, sig, n_ref)
-        close = 100 * np.exp(np.cumsum(rets))
-        idx = ref.index
-        rw_dfs.append(pd.DataFrame({"open": close, "high": close * (1 + 2 * sig),
-                                    "low": close * (1 - 2 * sig), "close": close,
-                                    "volume": 1.0}, index=idx))
-    print("════════ 随机游走对照 (20 GBM) — 触碰/破位在无信息市场的行为基线 ════════\n")
+    rw_dfs = [gbm_dataframe(n_ref, sig, seed=100 + k) for k in range(20)]
+    print("════════ 随机游走对照 (20 GBM, 真实 OHLC) — 触碰/破位在无信息市场的行为基线 ════════\n")
     run_b1({"1h": rw_dfs}, label_extra="(随机游走)")
 
 

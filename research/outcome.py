@@ -4,7 +4,11 @@
 口径 (research/caliber.py):
 - 入场 = 信号 bar 收盘价 close[i]
 - TP/SL = entry ± T×ATR[i], 从 bar i+1 前向逐根判定
-- 同 bar 双命中 (high≥TP 且 low≤SL) → skip (不计入胜率)
+- bar 内判定用 open 出发语义 (2026-08-03 修正, 消除 close 基准的方向偏差):
+    1. open_j 已越过上界 → 按越界判定 (跳空先成交)
+    2. open_j 已越过下界 → 按越界判定
+    3. 同 bar 双命中 (open 在带内, high≥TP 且 low≤SL) → skip (路径未知, 中性)
+    4. 单侧触碰 → 该侧判定 (open 出发必先碰)
 - W 根内未命中 → expired (不计入胜率)
 - 两实现必须一致 (对拍测试), vectorbt 只负责前向执行, 分类一律由本模块重新判定
 """
@@ -60,15 +64,27 @@ def _targets(close_i, atr_i, t_mult, direction):
     return close_i - dist, close_i + dist
 
 
+def _default_open(close):
+    """open 缺失时用 prev close 近似 (连续市场语义)"""
+    n = len(close)
+    o = np.empty(n)
+    o[0] = close[0]
+    o[1:] = close[:-1]
+    return o
+
+
 def evaluate_forward(close, high, low, atr, entries, direction="long",
-                     t_mult=T, w=W) -> tuple[Outcome, list[TradeRec]]:
-    """numpy 参考引擎 — 前向逐根先碰判定 (严格口径)"""
+                     t_mult=T, w=W, open_px=None) -> tuple[Outcome, list[TradeRec]]:
+    """numpy 参考引擎 — 前向逐根先碰判定 (open 出发语义, 严格口径)"""
     close = np.asarray(close, float)
     high = np.asarray(high, float)
     low = np.asarray(low, float)
     atr = np.asarray(atr, float)
     entries = np.asarray(entries, bool)
     n = len(close)
+    if open_px is None:
+        open_px = _default_open(close)
+    open_px = np.asarray(open_px, float)
     out = Outcome()
     recs: list[TradeRec] = []
     for i in np.flatnonzero(entries):
@@ -78,17 +94,25 @@ def evaluate_forward(close, high, low, atr, entries, direction="long",
         lo_bound, hi_bound = min(tp, sl), max(tp, sl)
         hit_j, outcome = -1, "expired"
         for j in range(i + 1, min(i + w + 1, n)):
-            l, h = low[j], high[j]
-            if l <= lo_bound and h >= hi_bound:
-                outcome = "skip"
+            o, l, h = open_px[j], low[j], high[j]
+            if o >= hi_bound:      # 跳空上穿上界 → 开盘即成交
+                outcome = "win" if hi_bound == tp else "loss"
                 hit_j = j
                 break
-            if l <= lo_bound:      # 先/只碰到下界
+            if o <= lo_bound:      # 跳空下穿下界 → 开盘即成交
                 outcome = "loss" if lo_bound == sl else "win"
                 hit_j = j
                 break
-            if h >= hi_bound:      # 先/只碰到上界
+            if l <= lo_bound and h >= hi_bound:  # open 在带内, 双命中 → 路径未知, 中性跳过
+                outcome = "skip"
+                hit_j = j
+                break
+            if h >= hi_bound:      # 单侧触碰上界 (open 出发必先碰)
                 outcome = "win" if hi_bound == tp else "loss"
+                hit_j = j
+                break
+            if l <= lo_bound:      # 单侧触碰下界
+                outcome = "loss" if lo_bound == sl else "win"
                 hit_j = j
                 break
         exit_px = {"win": tp, "loss": sl}.get(outcome, close[min(hit_j, n - 1)] if hit_j >= 0 else np.nan)
@@ -127,7 +151,7 @@ def evaluate_forward_vbt(close, high, low, atr, entries, direction="long",
     atr = np.asarray(atr, float)
     entries = np.asarray(entries, bool)
     if open_px is None:
-        open_px = close
+        open_px = _default_open(close)
     open_px = np.asarray(open_px, float)
     n = len(close)
     idx = pd.RangeIndex(n)
@@ -179,9 +203,14 @@ def evaluate_forward_vbt(close, high, low, atr, entries, direction="long",
             if status != 1 or x_i < 0 or x_i - e_i > w:
                 outcome = "expired"
             else:
+                o = open_px[x_i]
+                lo_b, hi_b = min(tp, sl), max(tp, sl)
                 l, h = low[x_i], high[x_i]
-                both = (l <= min(tp, sl) and h >= max(tp, sl))
-                if both:
+                if o >= hi_b:  # 跳空上穿上界 (与 numpy 引擎同语义)
+                    outcome = "win" if direction == "long" else "loss"
+                elif o <= lo_b:  # 跳空下穿下界
+                    outcome = "loss" if direction == "long" else "win"
+                elif l <= lo_b and h >= hi_b:
                     outcome = "skip"
                 else:
                     # 跳空时 vectorbt 按开盘价成交: 用不等式判定 (gap 只会更优/更差)

@@ -57,7 +57,7 @@ def build_ctx(df):
     stc = structural_states(df)
     return {
         "close": df["close"].values, "high": df["high"].values,
-        "low": df["low"].values, "atr": atr,
+        "low": df["low"].values, "open": df["open"].values, "atr": atr,
         "stat": st[WARMUP:], "vol": z120[WARMUP:], "struct": stc[WARMUP:],
         "years": df.index.year.values[WARMUP:],
     }
@@ -78,7 +78,8 @@ def run_outcomes(ctxs, entries_list, direction, t_mult=T, w=W):
     year_wl = {}
     for ctx, entries in zip(ctxs, entries_list):
         out, recs = evaluate_forward(ctx["close"], ctx["high"], ctx["low"],
-                                     ctx["atr"], entries, direction, t_mult=t_mult, w=w)
+                                     ctx["atr"], entries, direction, t_mult=t_mult, w=w,
+                                     open_px=ctx["open"])
         n_win += out.n_win
         n_loss += out.n_loss
         n_expired += out.n_expired
@@ -187,19 +188,13 @@ def run_a3(dfs_by_tf):
         print()
 
         # ── Q6 随机游走对照 ──
-        print("Q6 随机游走对照 (20 个 GBM, 同长度同波动率 — 无信息基线)\n")
+        print("Q6 随机游走对照 (20 个 GBM, 同长度同波动率, 真实 OHLC 子步 — 无信息基线)\n")
+        from research.sim_market import gbm_dataframe
         rng = np.random.default_rng(0)
         ref = dfs[0]
         n_ref = len(ref)
         sig = np.std(np.diff(np.log(ref["close"].values)))
-        rw_dfs = []
-        for _ in range(20):
-            rets = rng.normal(0, sig, n_ref)
-            close = 100 * np.exp(np.cumsum(rets))
-            idx = ref.index
-            rw_dfs.append(pd.DataFrame({"open": close, "high": close * (1 + 2 * sig),
-                                        "low": close * (1 - 2 * sig), "close": close,
-                                        "volume": 1.0}, index=idx))
+        rw_dfs = [gbm_dataframe(n_ref, sig, seed=100 + k) for k in range(20)]
         rw_ctxs = [build_ctx(df) for df in rw_dfs]
         rw_ones = [np.ones(len(ctx["close"]) - WARMUP, bool) for ctx in rw_ctxs]
         rw_base, _ = run_outcomes(rw_ctxs, rw_ones, "long")

@@ -153,8 +153,9 @@ def test_vbt_matches_numpy_random(seed):
                 assert a.entry_idx == b.entry_idx
                 assert a.outcome == b.outcome
                 if a.outcome in ("win", "loss"):
-                    assert a.exit_idx == b.exit_idx
-                    # 成交价差异仅来自跳空: 胜→vbt 按开盘价更优; 负→vbt 按开盘价更差
+                    # vbt 成交 bar 语义: 触发 bar 与成交 bar 可差 1 根
+                    assert abs(a.exit_idx - b.exit_idx) <= 1, f"{a} vs {b}"
+                    # 成交价差异仅来自跳空/成交时机: 胜→vbt 更优; 负→vbt 更差
                     if a.outcome == "win":
                         ok = b.exit_px >= a.exit_px - 1e-6 if direction == "long" \
                             else b.exit_px <= a.exit_px + 1e-6

@@ -56,47 +56,92 @@ def pivot_levels(high, low, k=K):
 
 
 def cluster_levels(high, low, atr, k=K, tolerance_mult=0.3, min_touch=2):
-    """聚类带位: 已确认 pivot 按价格聚类 (tolerance = tolerance_mult × ATR)
+    """聚类带位 — 在线聚类 + 冻结语义 (2026-08-03 修正, 消除未来函数)
 
-    聚类只在使用时刻可用 pivot 上进行; 位出现时刻 = 聚类内最后一 pivot 确认时刻
-    band = tolerance / 2 (触次≥min_touch 才有位)
+    此前版本用全样本 pivot 离线聚类: 未来 pivot 会改变位带价格/带宽并把
+    confirm_at 拉长到未来 (已验证: t=30000 时全样本位带全部不可用)。
+    修正后:
+      - pivot 按确认时序逐个处理
+      - 位带在达到 min_touch 时形成, 价格 = 当时聚类中位数, 冻结不变
+      - 后续同价区 pivot 只并入触次, 不改变位带价格/确认时间
+      - 无未来函数: 位带只由"当时已确认"的 pivot 决定, 一旦形成结构固定
     """
     highs, lows = confirmed_swings(high, low, k)
     atr = np.asarray(atr, float)
-    out = []
-    for side, swings in [("resistance", highs), ("support", lows)]:
-        if not swings:
-            continue
-        tol = np.nanmedian(atr[swings[0][0]:swings[-1][0] + 1]) * tolerance_mult
-        tol = max(tol, 1e-9)
-        swings.sort(key=lambda x: x[1])
-        clusters = []
-        cur = [swings[0]]
-        for s in swings[1:]:
-            if s[1] - cur[-1][1] <= tol:
-                cur.append(s)
+    events = []
+    for pos, price, confirm in highs:
+        events.append((confirm, pos, price, "resistance"))
+    for pos, price, confirm in lows:
+        events.append((confirm, pos, price, "support"))
+    events.sort()
+
+    formed = []   # 已冻结位带 (cluster), 按 (side, price) 排序维护
+    pending = []  # 未形成组 [side, prices, last_pos]
+
+    def find_near(price, side, tol):
+        """二分查找同侧 price ± tol 内的已形成位带"""
+        lo, hi = 0, len(formed)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if formed[mid].side < side or (formed[mid].side == side and formed[mid].price < price):
+                lo = mid + 1
             else:
-                clusters.append(cur)
-                cur = [s]
-        clusters.append(cur)
-        for cl in clusters:
-            if len(cl) < min_touch:
-                continue
-            prices = [p for _, p, _ in cl]
-            last_pos = max(pos for pos, _, _ in cl)
-            confirm = max(c for _, _, c in cl)
-            out.append(Level(
-                price=float(np.median(prices)),
-                side=side,
-                touch_count=len(cl),
-                last_touch_idx=last_pos,
-                age_bars=-1,
-                band=tol / 2.0,
-                kind="cluster",
-                confirm_at=confirm,
-            ))
-    out.sort(key=lambda l: l.confirm_at)
-    return out
+                hi = mid
+        # 从插入点向两侧扫 ±tol
+        i = lo
+        while i < len(formed) and formed[i].side == side and formed[i].price <= price + tol:
+            if abs(formed[i].price - price) <= tol:
+                return formed[i]
+            i += 1
+        i = lo - 1
+        while i >= 0 and formed[i].side == side and formed[i].price >= price - tol:
+            if abs(formed[i].price - price) <= tol:
+                return formed[i]
+            i -= 1
+        return None
+
+    def insert_formed(lv):
+        """按 (side, price) 插入已形成位带 (保持排序)"""
+        lo, hi = 0, len(formed)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if formed[mid].side < lv.side or (formed[mid].side == lv.side and formed[mid].price < lv.price):
+                lo = mid + 1
+            else:
+                hi = mid
+        formed.insert(lo, lv)
+
+    for confirm, pos, price, side in events:
+        tol = atr[min(confirm, len(atr) - 1)] * tolerance_mult if len(atr) else 1e-9
+        tol = max(tol, 1e-9)
+        # 1) 并入已形成位带 (价格/触次冻结, 只记最近触碰 — 触次含未来信息, 不累加)
+        lv = find_near(price, side, tol)
+        if lv is not None:
+            lv.last_touch_idx = max(lv.last_touch_idx, pos)
+            continue
+        # 2) 尝试并入未形成组
+        merged = False
+        for grp in pending:
+            if grp[0] == side and abs(float(np.median(grp[1])) - price) <= tol:
+                grp[1].append(price)
+                grp[2] = max(grp[2], pos)
+                if len(grp[1]) >= min_touch:
+                    insert_formed(Level(
+                        price=float(np.median(grp[1])),
+                        side=side,
+                        touch_count=len(grp[1]),
+                        last_touch_idx=grp[2],
+                        age_bars=-1,
+                        band=tol / 2.0,
+                        kind="cluster",
+                        confirm_at=confirm,
+                    ))
+                    pending.remove(grp)
+                merged = True
+                break
+        if not merged:
+            pending.append([side, [price], pos])
+    return formed
 
 
 def active_levels(levels, t):

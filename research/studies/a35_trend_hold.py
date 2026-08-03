@@ -69,8 +69,7 @@ def run_combo(dfs, sl_mode, exit_late, direction, tag, w=96):
                                 sl_mode, exit_late, w)
         yrs = df.index.year.values[WARMUP:]
         for t in trades:
-            if t.reason == "timeout":
-                continue
+            # timeout 也是真实结果 (超时平仓价 close), 必须计入期望 — 排除会虚高
             rs.append(t.r_mult)
             reasons.append(t.reason)
             years.append(yrs[t.entry_idx])
@@ -136,19 +135,12 @@ def main():
         print()
 
         # ── 随机游走对照 ──
-        print("Q3 随机游走对照 (20 GBM, 同长度同波动率)\n")
-        rng = np.random.default_rng(0)
+        print("Q3 随机游走对照 (20 GBM, 真实 OHLC 子步)\n")
+        from research.sim_market import gbm_dataframe
         ref = dfs[0]
         n_ref = len(ref)
         sig = np.std(np.diff(np.log(ref["close"].values)))
-        rw_dfs = []
-        for _ in range(20):
-            rets = rng.normal(0, sig, n_ref)
-            close = 100 * np.exp(np.cumsum(rets))
-            idx = ref.index
-            rw_dfs.append(pd.DataFrame({"open": close, "high": close * (1 + 2 * sig),
-                                        "low": close * (1 - 2 * sig), "close": close,
-                                        "volume": 1.0}, index=idx))
+        rw_dfs = [gbm_dataframe(n_ref, sig, seed=100 + k) for k in range(20)]
         r_rw = pro_trend_ratio(rw_dfs)
         print(f"  Q1 随机游走: 顺K比例 {r_rw:.1%}")
         for sl, sln in [("hl", "跟踪HL"), ("atr", "固定ATR")]:
