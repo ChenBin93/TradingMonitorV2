@@ -59,3 +59,9 @@ research/
 - 双命中真实赢面 42%：1H 粒度回测略高估
 - 判定窗口 30 根 + 指标历史 120 根（切换灵敏度最优）
 - 详细记录：docs/STRATEGY_VALIDATION.md（45 章）
+
+## 性能规范补充 (2026-08-03)
+- **find_swing_levels 逐采样点调用是反模式** (600根窗口纯Python聚类, 12.7万次=15分钟)
+- 正确做法: 预计算极值 mask (rolling max/min 向量化) + numpy 切片接近检测
+  (贴位/touch/年龄 O(600) 向量化) → 101s vs 20分钟 (12x)
+- 参考: level_state_fast.py
