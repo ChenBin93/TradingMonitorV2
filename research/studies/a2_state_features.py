@@ -25,8 +25,8 @@ from scipy.stats import chi2_contingency
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from market_phase import _adx_series, _atr_series, classify
 from research.data_loader import load_candles, verify
+from research.state_features import state_series, vol_z_states
 
 WARMUP = 730  # ma60+shift10+body13 + 波动长分位 720 根
 
