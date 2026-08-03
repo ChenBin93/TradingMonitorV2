@@ -14,6 +14,7 @@ class Level:
     side: str           # "support" or "resistance"
     strength: str        # "强" / "中" / "弱"
     last_touch_idx: int  # 最近一次触及的 K 线索引
+    age_bars: int = -1   # 距最新 K 的根数 (0=刚形成; 研究: 200-400 最优)
 
 
 def find_swing_levels(df: pd.DataFrame, lookback: int = 50) -> list[Level]:
@@ -69,10 +70,35 @@ def find_swing_levels(df: pd.DataFrame, lookback: int = 50) -> list[Level]:
                     side=side,
                     strength=strength,
                     last_touch_idx=last_idx,
+                    age_bars=(n - 1) - last_idx,
                 ))
 
     levels.sort(key=lambda x: (x.touch_count, x.last_touch_idx), reverse=True)
     return levels
+
+
+def find_recent_extremes(df: pd.DataFrame, lookback: int = 100) -> dict:
+    """最近 swing 低点/高点 (类型A: 结构锚贴位检测)
+
+    返回 {"low": (idx_in_tail, price), "high": (idx_in_tail, price), "age": ...}
+    研究: 最近极值贴住(0-0.5ATR未破) 63.7-67.1%; 刚跌破 31-40%
+    """
+    if len(df) < 5:
+        return {"low": None, "high": None}
+
+    df = df.tail(lookback).reset_index(drop=True)
+    lows = df["low"].values
+    highs = df["high"].values
+    n = len(df)
+
+    last_low = None
+    last_high = None
+    for i in range(2, n - 2):
+        if lows[i] <= min(lows[i-2:i+3]):
+            last_low = (i, float(lows[i]))
+        if highs[i] >= max(highs[i-2:i+3]):
+            last_high = (i, float(highs[i]))
+    return {"low": last_low, "high": last_high}
 
 
 def get_nearest_levels(levels: list[Level], current_price: float) -> tuple[Optional[Level], Optional[Level]]:

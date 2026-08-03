@@ -15,7 +15,7 @@ from indicators import compute as compute_indicators
 from signals import SIGNALS, SignalState, get_direction, get_regime, is_compressing, check_warnings, check_brewing
 from notify import Feishu
 from utils import setup_logging, start_health_server, fmt_price
-from support_resistance import find_swing_levels, get_nearest_levels
+from support_resistance import find_swing_levels, find_recent_extremes, get_nearest_levels
 from volume_profile import compute_volume_profile, get_nearest_nodes
 from market_state import compute_market_state, scene_of, SCENE_WR, SCENE_BOOST
 from relative_strength import compute_rs
@@ -692,6 +692,22 @@ def do_scan(
     return alerts, all_ind, rs_scores_all
 
 
+def _level_quality(lvl, overlap4h: bool) -> str:
+    """关键位质量分 (研究: age 200-400最优 + touch≥3 + 4H重叠 → 单调 53.8→62.1%)"""
+    sc = 0
+    if 200 <= lvl.age_bars < 400:
+        sc += 2
+    elif lvl.age_bars >= 100:
+        sc += 1
+    if lvl.touch_count >= 5:
+        sc += 1
+    elif lvl.touch_count >= 3:
+        sc += 0.5
+    if overlap4h:
+        sc += 1.5
+    return "高" if sc >= 3 else "中" if sc >= 1.5 else "低"
+
+
 def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] | None = None):
     check = []
 
@@ -807,21 +823,50 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
     sr_info = {}
     df_1h = (ind_1h or {}).get("df")
     if df_1h is not None and current_price:
-        levels = find_swing_levels(df_1h, lookback=50)
+        # lookback=600: 质量分年龄维度需要 200-400 根历史 (研究结论)
+        levels = find_swing_levels(df_1h, lookback=600)
         support, resistance = get_nearest_levels(levels, current_price)
 
         if support:
             p = support.price
             dist_a = abs(current_price - p) / max(atr_1h, 1e-9)
             dist_lbl = "近" if dist_a <= 0.5 else "远" if dist_a >= 1.5 else ""
-            alert.meta["support"] = f"{fmt_price(p, atr_1h)}({support.strength},{support.touch_count}触{dist_lbl})"
+            q = _level_quality(support, has_4h_boundary)
+            alert.meta["support"] = f"{fmt_price(p, atr_1h)}({support.strength},{support.touch_count}触{dist_lbl}质{q})"
             sr_info["support"] = support
         if resistance:
             p = resistance.price
             dist_a = abs(current_price - p) / max(atr_1h, 1e-9)
             dist_lbl = "近" if dist_a <= 0.5 else "远" if dist_a >= 1.5 else ""
-            alert.meta["resistance"] = f"{fmt_price(p, atr_1h)}({resistance.strength},{resistance.touch_count}触{dist_lbl})"
+            q = _level_quality(resistance, has_4h_boundary)
+            alert.meta["resistance"] = f"{fmt_price(p, atr_1h)}({resistance.strength},{resistance.touch_count}触{dist_lbl}质{q})"
             sr_info["resistance"] = resistance
+
+        # ── 类型A: 最近极值贴位 (研究: 贴而未破 63.7-67.1% vs 刚跌破 31-40%) ──
+        rec = find_recent_extremes(df_1h, lookback=600)
+        touch_type = None
+        touch_dist = None
+        if alert.direction == "long" and rec["low"] is not None:
+            d = (current_price - rec["low"][1]) / max(atr_1h, 1e-9)
+            if -0.5 <= d <= 0.5:
+                touch_dist = d
+                touch_type = "A_贴位未破" if d >= 0 else "A_位已破"
+        elif alert.direction == "short" and rec["high"] is not None:
+            d = (rec["high"][1] - current_price) / max(atr_1h, 1e-9)
+            if -0.5 <= d <= 0.5:
+                touch_dist = d
+                touch_type = "A_贴位未破" if d >= 0 else "A_位已破"
+        if touch_type is not None and touch_dist is not None:
+            alert.meta["touch_type"] = touch_type
+            if touch_type == "A_贴位未破":
+                check.append(f"✓贴位{touch_dist:.1f}ATR")
+                if scene.startswith("episode"):
+                    alert.confidence = min(alert.confidence * 1.05, 1.0)
+                    base_scene = alert.meta.get("scene", "")
+                    alert.meta["scene"] = f"{base_scene}·贴位65-67%"
+            else:
+                check.append(f"⚠位已破{touch_dist:.1f}ATR")
+                alert.confidence = min(alert.confidence * 0.90, 1.0)
 
         pos_in_range = None
         if support and resistance and resistance.price > support.price:
