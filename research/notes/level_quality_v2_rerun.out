@@ -1,0 +1,47 @@
+BTC/USDT:USDT: 946
+ETH/USDT:USDT: 1934
+SOL/USDT:USDT: 2997
+BNB/USDT:USDT: 3979
+XRP/USDT:USDT: 4972
+DOGE/USDT:USDT: 5924
+ADA/USDT:USDT: 6937
+AVAX/USDT:USDT: 7959
+LINK/USDT:USDT: 8989
+DOT/USDT:USDT: 9929
+LTC/USDT:USDT: 11010
+BCH/USDT:USDT: 12059
+NEAR/USDT:USDT: 13031
+OP/USDT:USDT: 14049
+ARB/USDT:USDT: 15098
+ATOM/USDT:USDT: 16098
+SUI/USDT:USDT: 17213
+UNI/USDT:USDT: 18247
+TIA/USDT:USDT: 19106
+INJ/USDT:USDT: 20007
+
+贴锚样本 (lookback=600): 20007
+基线胜率: 56.0%
+
+═══ 扩展窗口: 年龄分档 ═══
+  年龄 0-50根                                     n= 13824 胜率= 55.4% Δ= -0.6pp
+  年龄 50-100根                                   n=  2669 胜率= 56.3% Δ= +0.3pp
+  年龄 100-200根                                  n=  2164 胜率= 55.6% Δ= -0.4pp
+  年龄 200-400根                                  n=  1017 胜率= 63.5% Δ= +7.5pp
+  年龄 400-600根                                  n=   333 胜率= 58.0% Δ= +1.9pp
+  年龄 600+根                                     n=    0 样本不足
+
+═══ 扩展窗口: touch 分档 (拐点确认) ═══
+  touch=2                                      n=  1380 胜率= 54.6% Δ= -1.5pp
+  3-4                                          n=  2332 胜率= 55.7% Δ= -0.3pp
+  5-7                                          n=  2565 胜率= 56.5% Δ= +0.4pp
+  8-10                                         n=  1485 胜率= 56.4% Δ= +0.4pp
+  11-15                                        n=  1484 胜率= 54.0% Δ= -2.0pp
+  16+                                          n= 10761 胜率= 56.4% Δ= +0.4pp
+
+═══ 关键位质量分 (年龄+touch+重叠) 单调性 ═══
+     质量分       n      胜率      Δ
+  0-1       2894   50.7%  -5.3pp
+  1-2       4612   54.3%  -1.7pp
+  2-3       9939   56.9%  +0.9pp
+  3-4       2157   61.1%  +5.1pp
+  4-5.5      388   64.9%  +8.9pp
