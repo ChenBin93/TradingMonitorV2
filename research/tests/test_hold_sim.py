@@ -108,6 +108,77 @@ def test_short_mirror():
     assert abs(t.r_mult - (100 - 92) / 5.0) < 1e-9  # +1.6
 
 
+def test_peak_trail_exit():
+    """峰值回撤退出: 先涨到峰值 → 回撤 peak_trail×ATR 触发"""
+    # entry bar0 close=100, atr=1 → stop=99; peak_trail=2 (回撤 2 退出)
+    closes = [100.0, 103.0, 102.0, 101.0, 99.5, 99.0]
+    c, h, l, a = mk(closes, atr=1.0)
+    # bar1 峰值 104 → trail=102; bar2 峰值 104.5 → trail=102.5
+    h = np.array([100.0, 104.0, 104.5, 103.0, 102.0, 100.0])
+    states = np.array(["up:early"] * 6)
+    entries = np.array([True] + [False] * 5)
+    # bar2 close=102 < 102.5 → 触发@2
+    trades = simulate_holds(c, h, l, a, states, entries, "long", "atr",
+                            exit_late=False, w=96, peak_trail=2.0)
+    assert len(trades) == 1
+    t = trades[0]
+    assert t.reason == "trail"
+    assert t.exit_idx == 2
+    assert abs(t.exit_px - 102.5) < 1e-9
+    assert abs(t.r_mult - 2.5) < 1e-9  # (102.5-100)/1
+
+
+def test_peak_trail_tracks_up():
+    """峰值回撤线随峰值上移: 更高峰值 → 回撤线更高"""
+    closes = [100.0, 103.0, 105.0, 104.0, 103.0, 102.0]
+    c, h, l, a = mk(closes, atr=1.0)
+    h = np.array([100.0, 104.0, 106.0, 105.0, 104.0, 103.0])  # bar2 峰值 106
+    states = np.array(["up:early"] * 6)
+    entries = np.array([True] + [False] * 5)
+    # bar2: peak=106 → trail=106-2=104; bar3 close=104 不 < 104; bar4 close=103 < 104 → 触发@4
+    trades = simulate_holds(c, h, l, a, states, entries, "long", "atr",
+                            exit_late=False, w=96, peak_trail=2.0)
+    assert len(trades) == 1
+    t = trades[0]
+    assert t.reason == "trail"
+    assert t.exit_idx == 4
+    assert abs(t.exit_px - 104.0) < 1e-9
+    assert abs(t.r_mult - 4.0) < 1e-9  # (104-100)/1
+
+
+def test_peak_trail_no_exit_below_stop():
+    """回撤线不低于初始止损: 未创新高时 trail=stop, 止损触发"""
+    closes = [100.0, 99.5, 99.0, 98.5, 98.0]
+    c, h, l, a = mk(closes, atr=1.0)
+    h = np.array([100.0, 100.0, 99.5, 99.0, 98.5])
+    states = np.array(["up:early"] * 5)
+    entries = np.array([True] + [False] * 4)
+    trades = simulate_holds(c, h, l, a, states, entries, "long", "atr",
+                            exit_late=False, w=96, peak_trail=2.0)
+    assert len(trades) == 1
+    t = trades[0]
+    assert t.reason == "stop"  # 未创新高, 回撤线=stop=99, close<99 触发
+    assert abs(t.exit_px - 99.0) < 1e-9
+
+
+def test_peak_trail_short_mirror():
+    """short 镜像: 从最低点回撤触发"""
+    closes = [100.0, 97.0, 98.0, 99.0, 99.5, 100.0]
+    c, h, l, a = mk(closes, atr=1.0)
+    l = np.array([100.0, 96.0, 97.5, 98.5, 99.0, 99.5])  # bar1 谷值 96
+    states = np.array(["down:early"] * 6)
+    entries = np.array([True] + [False] * 5)
+    # bar1: peak(谷)=96 → trail=96+2=98; bar2 close=98 不 > 98; bar3 close=99 > 98 → 触发@3
+    trades = simulate_holds(c, h, l, a, states, entries, "short", "atr",
+                            exit_late=False, w=96, peak_trail=2.0)
+    assert len(trades) == 1
+    t = trades[0]
+    assert t.reason == "trail"
+    assert t.exit_idx == 3
+    assert abs(t.exit_px - 98.0) < 1e-9
+    assert abs(t.r_mult - 2.0) < 1e-9  # (100-98)/1
+
+
 def test_invariance_real_data():
     """无未来函数: 追加 K 线不改变历史交易"""
     import os

@@ -47,10 +47,16 @@ def _initial_stop(entry_px, atr_i, sl_mode, pivot_lows, pl_idx, direction, sl_mu
 
 def simulate_holds(close, high, low, atr, states, entries,
                    direction="long", sl_mode="hl", exit_late=False, w=96,
-                   sl_mult=1.0):
+                   sl_mult=1.0, peak_trail=None):
     """逐笔模拟 (事件式, 每笔独立 — 允许重叠, 与 A3 事件口径一致)
 
-    返回 (trades: list[HoldTrade], 分年 R: dict[year, list[float]])
+    peak_trail: 峰值回撤退出 (单位 = 入场 ATR 倍数), 默认 None 不启用
+      long: 从持仓最高点 (intrabar high) 回撤 peak_trail×ATR 退出 (收盘确认)
+      short: 从持仓最低点回撤
+      回撤线不低于初始止损 (long: max(stop, peak - trail))
+      收益端不限幅 — 趋势走得越远保护线越高, 但不设目标价
+
+    返回 (trades: list[HoldTrade])
     """
     close = np.asarray(close, float)
     atr = np.asarray(atr, float)
@@ -83,7 +89,20 @@ def simulate_holds(close, high, low, atr, states, entries,
             stop = entry_px - atr[i] if direction == "long" else entry_px + atr[i]
             r_base = atr[i]
         exit_px, reason = None, "timeout"
+        peak = entry_px
+        trail = stop
         for t in range(i + 1, min(i + w + 1, n)):
+            # 峰值更新 (intrabar 历史高/低, 无未来)
+            if direction == "long":
+                if high[t] > peak:
+                    peak = high[t]
+                if peak_trail is not None:
+                    trail = max(stop, peak - peak_trail * atr[i])
+            else:
+                if low[t] < peak:
+                    peak = low[t]
+                if peak_trail is not None:
+                    trail = min(stop, peak + peak_trail * atr[i])
             # 推进已确认 pivots (j+k <= t)
             if direction == "long":
                 while pl_i < len(piv_lows) and piv_lows[pl_i][0] + K <= t:
@@ -98,6 +117,12 @@ def simulate_holds(close, high, low, atr, states, entries,
             # late 退出 (持仓中首次出现 late 状态即平仓)
             if exit_late and states[t] == late_tag:
                 exit_px, reason = close[t], "late"
+                break
+            # 峰值回撤退出 (收盘确认, 收益端不限幅; 回撤线偏离初始止损才启用)
+            if peak_trail is not None and trail != stop and \
+               ((direction == "long" and close[t] < trail) or
+                (direction == "short" and close[t] > trail)):
+                exit_px, reason = trail, "trail"
                 break
             # 止损触发 (收盘破位)
             if (direction == "long" and close[t] < stop) or \
