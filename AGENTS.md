@@ -20,7 +20,12 @@ TradingMonitor V2 — OKX 永续合约实时监控 + 量化研究系统。Python
 - 自研回测引擎（backtest_*.py）已整体删除（2026-08-03），后续回测验证改用第三方框架（待定）
 - `data/backtest.db`（gitignored，保留）：20 标的 × 5m/1h/4h × 3 年（2023-08→2026-08，约 690 万行）原始 K 线，可作为第三方框架的数据源；与 live 的 data/history.db 完全独立。如需补充/重下数据可参考 history.py 的 OKX history-candles 分页逻辑（after 参数翻向过去）
 - **未来函数是本仓库第一大禁忌**：K线时间戳 = bar 开盘时间；研究只能用已收盘 bar。此前整批研究（level/episode 体系等）因未来函数污染作废，两天工作白费（git log: "reset: delete all research (contaminated by future-function)"）。**研究已重头开始（2026-08-03）**，旧研究结论一律不可直接采信，必须用无未来函数方法重验
-- 新研究：用第三方回测框架搭建，脚本必须写明无未来函数设计；结论落地后提交（提交前缀风格: `research:` / `live:` / `fix:` / `docs:`）
+- **研究基础设施（research/，pytest 门禁）**：
+  - `research/caliber.py` — 严格口径唯一来源：入场=信号 bar 收盘、对称 1:1 T×ATR、前向先碰判定、同 bar 双命中跳过、超时 expired、MIN_N=200。**研究脚本禁止硬编码口径**
+  - `research/data_loader.py` — backtest.db 加载 + 完整性检查 + MTF 对齐（`align_higher`：高位 bar 必须已收盘才能用，低位 t 只能用 open+时长 ≤ t 的高位 bar）
+  - `research/outcome.py` — 双实现结果引擎：numpy 参考引擎（权威）+ vectorbt（column-per-entry 模拟，去重主单）。**vectorbt 语义坑**：sl_stop/tp_stop 是百分比非价格、跳空按开盘价成交、止损单偶发部分成交伪影——全部已被测试锁定，别改这些约定
+  - `research/tests/` — 黄金测试（手算答案）+ 未来函数不变性测试（追加 K 线特征值不许变）+ MTF 边界 + 真实数据对拍。**每次研究前必跑 `python3 -m pytest research/tests -q`（约 2 分钟），失败即停**
+- 新研究流程：`research/studies/` 写脚本（docstring 写明无未来函数设计 + 预注册假设）→ 输出 `research/notes/` → 结论落地后提交（提交前缀风格: `research:` / `live:` / `fix:` / `docs:`）
 
 ## 文档
 - docs/LIVE_SYSTEM.md — 当前 live 系统规格（2026-08-03 更新；注意部分验证结论基于已作废研究，落地标记待重验）
