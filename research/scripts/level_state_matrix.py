@@ -201,7 +201,7 @@ for dkey, dname in [("support", "═══ 贴支撑做多 (0<=dist<=0.5ATR) ═
         line = f"  {st:<8}"
         for q in Q3:
             w, l = res[dkey][st][q]
-            nn = w + l
+            nn = l  # FIX
             if nn < 50:
                 line += f"{'--('+str(nn)+')':>14}"
             else:
@@ -212,6 +212,6 @@ for dkey, dname in [("support", "═══ 贴支撑做多 (0<=dist<=0.5ATR) ═
     for q in Q3:
         tot_w = sum(res[dkey][st][q][0] for st in STATE9)
         tot_l = sum(res[dkey][st][q][1] for st in STATE9)
-        nn = tot_w + tot_l
+        nn = tot_l  # FIX
         if nn > 0:
             print(f"    {q:<12}: n={nn:>6} 胜率={tot_w/nn*100:.1f}%")

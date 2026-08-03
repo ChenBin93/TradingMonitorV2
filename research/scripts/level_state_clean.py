@@ -193,7 +193,7 @@ for dir_key, dname in [("long", "═══ 贴支撑未破 → 做多 ═══"
         for col, qs in [("全部", Q3), ("低", ["低"]), ("中", ["中"]), ("高", ["高"])]:
             w = sum(res[dir_key][st][q][0] for q in qs)
             l = sum(res[dir_key][st][q][1] for q in qs)
-            nn = w + l
+            nn = l  # FIX: res[1] already total hits
             if nn < 100:
                 line += f"{'--('+str(nn)+')':>12}"
             else:
@@ -209,6 +209,6 @@ for dir_key, dname in [("long", "═══ 贴支撑未破 → 做多 ═══"
     for label, states in [("顺日线", ok_states), ("逆日线", ko_states)]:
         w = sum(res[dir_key][s][q][0] for s in states for q in Q3)
         l = sum(res[dir_key][s][q][1] for s in states for q in Q3)
-        nn = w + l
+        nn = l  # FIX: res[1] already total hits
         if nn > 0:
             print(f"  [汇总] {label}: n={nn:>6} 胜率={w/nn*100:.1f}%")
