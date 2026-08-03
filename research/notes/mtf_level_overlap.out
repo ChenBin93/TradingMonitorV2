@@ -1,0 +1,41 @@
+BTC/USDT:USDT: 935
+ETH/USDT:USDT: 1926
+SOL/USDT:USDT: 2984
+BNB/USDT:USDT: 4032
+XRP/USDT:USDT: 5083
+DOGE/USDT:USDT: 6102
+ADA/USDT:USDT: 7092
+AVAX/USDT:USDT: 8089
+LINK/USDT:USDT: 9143
+DOT/USDT:USDT: 10158
+LTC/USDT:USDT: 11281
+BCH/USDT:USDT: 12356
+NEAR/USDT:USDT: 13368
+OP/USDT:USDT: 14399
+ARB/USDT:USDT: 15488
+ATOM/USDT:USDT: 16508
+SUI/USDT:USDT: 17575
+UNI/USDT:USDT: 18602
+TIA/USDT:USDT: 19515
+INJ/USDT:USDT: 20399
+
+贴锚样本: 20399
+基线胜率: 56.2%
+
+═══ 跨周期重叠 × 贴锚胜率 ═══
+无跨周期重叠 (仅1H位)                                  n= 17396 胜率= 56.0% Δ= -0.2pp
+重叠4H位                                          n=  2069 胜率= 58.0% Δ= +1.8pp
+重叠日线位                                          n=  2612 胜率= 57.0% Δ= +0.8pp
+同时重叠4H+日线                                      n=  1678 胜率= 57.3% Δ= +1.1pp
+
+═══ 年龄 × 跨周期重叠 交互 ═══
+年龄<100 + 无重叠                                   n= 14880 胜率= 55.6% Δ= -0.6pp
+年龄<100 + 重叠4H                                  n=  1809 胜率= 58.0% Δ= +1.8pp
+年龄>=100 + 无重叠                                  n=  2516 胜率= 58.0% Δ= +1.8pp
+年龄>=100 + 重叠4H                                 n=   260 胜率= 58.5% Δ= +2.3pp
+
+═══ touch × 跨周期重叠 ═══
+touch=2 + 无重叠                                  n=  1182 胜率= 53.8% Δ= -2.4pp
+touch=2 + 重叠4H                                 n=   155 胜率= 59.4% Δ= +3.2pp
+touch>=3 + 无重叠                                 n= 16214 胜率= 56.1% Δ= -0.1pp
+touch>=3 + 重叠4H                                n=  1914 胜率= 57.9% Δ= +1.7pp
