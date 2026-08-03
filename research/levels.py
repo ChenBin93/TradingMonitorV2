@@ -185,6 +185,84 @@ def close_breakout(levels, t, close):
     return broken
 
 
+def level_breakdown(lv, close, atr, depth=0.5, w=24, hold_ratio=0.5):
+    """单位的穿透/确认向量 (向量化, 事后标签 — 合法使用未来数据)
+
+    穿透 attempt: close 越出位带外侧 ≥ depth×ATR (穿透时刻的 ATR)
+    确认 confirmed: 穿透后未来 w 根内 close 保持在外侧的比例 ≥ hold_ratio
+    外侧 outside: close 越过位带外沿 (price ± band)
+
+    返回 (attempt, confirmed, outside, ratio) 布尔/浮点数组 (长度 n)
+    """
+    n = len(close)
+    p_lo = lv.price - lv.band
+    p_hi = lv.price + lv.band
+    if lv.side == "support":
+        outside = close < p_lo
+        attempt = close < p_lo - depth * atr
+    else:
+        outside = close > p_hi
+        attempt = close > p_hi + depth * atr
+    # 未来 [t+1, t+w] 的外侧比例 (后缀和差分; 越界处按 0 处理)
+    suffix = np.concatenate([outside[::-1].cumsum()[::-1], np.zeros(1)])
+    idx = np.arange(n)
+    s_next = np.zeros(n)
+    s_next[:n - 1] = suffix[1:n]
+    s_end = np.zeros(n)
+    end_idx = idx + (w + 1)
+    valid = end_idx <= n
+    s_end[valid] = suffix[end_idx[valid]]
+    cnt = s_next - s_end
+    ratio = cnt / w
+    confirmed = attempt & (ratio >= hold_ratio)
+    return attempt, confirmed, outside, ratio
+
+
+def level_touch_class(lv, close, high, low, atr, depth=0.5, w=24, hold_ratio=0.5):
+    """触碰进入事件 × 后续判定 (向量化)
+
+    触碰进入: intrabar 触及位带且前一根未触及 (confirm_at 后)
+    判定 (触碰后 w 根内):
+      breakout: 发生确认突破 (confirmed) → 位失效
+      reject:   无确认突破 → 有效拒绝 (位保持)
+    假突破 (attempt 但未 confirmed) 单独统计 (reject 的子集)
+
+    返回 dict: touch(进入 idx), reject(touch 被拒绝), breakout(touch 被突破),
+               attempt(穿透 idx), confirmed(真突破 idx), false_break(假穿透 idx)
+    """
+    n = len(close)
+    t_arr = np.arange(n)
+    usable = t_arr >= lv.confirm_at
+    p_lo = lv.price - lv.band
+    p_hi = lv.price + lv.band
+    tm = (low <= p_hi) & (high >= p_lo) & usable
+    touch = tm.copy()
+    touch[1:] &= ~tm[:-1]
+    attempt, confirmed, outside, ratio = level_breakdown(lv, close, atr, depth, w, hold_ratio)
+    # 触碰后 w 根内是否有确认突破
+    suffix_conf = np.concatenate([confirmed[::-1].cumsum()[::-1], np.zeros(1)])
+    s_next = np.zeros(n)
+    s_next[:n - 1] = suffix_conf[1:n]
+    s_end = np.zeros(n)
+    end_idx = np.arange(n) + (w + 1)
+    valid = end_idx <= n
+    s_end[valid] = suffix_conf[end_idx[valid]]
+    has_break = (s_next - s_end) > 0
+    # 触碰后被突破: 触碰 t 且 [t+1, t+w] 内有 confirmed
+    t_break = touch & has_break
+    t_reject = touch & ~has_break
+    # 穿透分类 (独立事件): attempt 中 confirmed 为真突破, 否则假突破
+    false_break = attempt & ~confirmed
+    return {
+        "touch": np.flatnonzero(touch),
+        "reject": np.flatnonzero(t_reject),
+        "breakout": np.flatnonzero(t_break),
+        "attempt": np.flatnonzero(attempt),
+        "confirmed": np.flatnonzero(confirmed),
+        "false_break": np.flatnonzero(false_break),
+    }
+
+
 def nearest_levels(levels, t, price):
     """当前价格下方最近支撑 / 上方最近阻力 (可用位)"""
     sup = res = None

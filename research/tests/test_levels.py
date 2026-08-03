@@ -8,7 +8,8 @@ import pandas as pd
 import pytest
 
 from research.levels import (active_levels, cluster_levels, close_breakout,
-                             confirmed_swings, pivot_levels, touches_at)
+                             confirmed_swings, level_breakdown, level_touch_class,
+                             pivot_levels, touches_at)
 
 
 def mk(closes, spikes, atr_val=1.0, hi_margin=0.5, lo_margin=0.5):
@@ -152,3 +153,89 @@ def test_live_consistency():
     matched = sum(1 for lp in live_prices[:8] if any(abs(lp - ap) < 3 * atr for ap in act_prices))
     assert matched >= max(1, len(live_prices[:8]) * 0.5), \
         f"live 位与研究版共识不足: {matched}/{len(live_prices[:8])}"
+
+
+def _mk_lv(price=100.0, side="support", band=0.5, confirm_at=0):
+    from research.levels import Level
+    return Level(price, side, 2, 0, -1, band, "cluster", confirm_at)
+
+
+def test_breakdown_true_breakout():
+    """穿透 0.5ATR 后未来 24 根内 >50% 时间保持外侧 → 真突破"""
+    lv = _mk_lv(price=100.0, side="support", band=0.5)
+    n = 60
+    close = np.full(n, 101.0)
+    atr = np.full(n, 2.0)  # 穿透深度 0.5×2=1; 外侧 = close < 99.5
+    # bar 10 穿透: close=98 (< 99.5-1=98.5? 98 < 98.5 ✓), 之后 20 根保持 98
+    close[10:32] = 98.0
+    attempt, confirmed, outside, ratio = level_breakdown(lv, close, atr, 0.5, 24, 0.5)
+    assert attempt[10]
+    assert confirmed[10]  # 未来 24 根 (11..34) 全部外侧 98<99.5 → 比例 1.0
+    # 穿透段内的持续确认合理; 回拉后不再确认
+    assert not confirmed[40]  # close[40:]=101 内侧
+
+
+def test_breakdown_false_breakout():
+    """穿透后立刻回拉 → 假突破 (未确认)"""
+    lv = _mk_lv(price=100.0, side="support", band=0.5)
+    n = 60
+    close = np.full(n, 101.0)
+    atr = np.full(n, 2.0)
+    close[10] = 98.0   # 穿透 1 根
+    close[11:] = 101.0  # 立即回拉
+    attempt, confirmed, outside, ratio = level_breakdown(lv, close, atr, 0.5, 24, 0.5)
+    assert attempt[10]
+    assert not confirmed[10]
+    assert ratio[10] < 0.5
+
+
+def test_touch_class_reject_and_breakout():
+    """触碰后: 无确认突破 → 拒绝; 有确认突破 → 突破 (位失效)"""
+    lv = _mk_lv(price=100.0, side="support", band=0.5)
+    n = 80
+    close = np.full(n, 101.0)
+    high = np.full(n, 102.0)
+    low = np.full(n, 101.5)  # 远离位带 (99.5-100.5)
+    atr = np.full(n, 2.0)
+    # 触碰1 @5 (low 触 99.5 带): 之后维持 101 → 拒绝
+    low[5] = 99.0
+    # 触碰2 @50: 穿透 98 + 保持 26 根 (>50%×24) → 突破
+    low[50] = 99.0
+    close[50:76] = 98.0
+    low[50:76] = 97.5
+    res = level_touch_class(lv, close, high, low, atr, 0.5, 24, 0.5)
+    assert 5 in res["reject"]
+    assert 50 in res["breakout"]
+    assert 5 not in res["breakout"]
+    assert 50 not in res["reject"]
+
+
+def test_touch_class_false_break_is_reject():
+    """穿透但未确认 (假突破) → 触碰仍算拒绝"""
+    lv = _mk_lv(price=100.0, side="support", band=0.5)
+    n = 60
+    close = np.full(n, 101.0)
+    high = np.full(n, 102.0)
+    low = np.full(n, 101.5)  # 远离位带
+    atr = np.full(n, 2.0)
+    low[5] = 99.0
+    low[6:] = 100.5
+    close[5] = 98.0   # 穿透 1 根
+    close[6:] = 101.0  # 回拉
+    res = level_touch_class(lv, close, high, low, atr, 0.5, 24, 0.5)
+    assert 5 in res["reject"]
+    assert 5 in res["false_break"]
+    assert 5 not in res["breakout"]
+    assert 5 in res["attempt"]
+
+
+def test_touch_class_respects_confirm_at():
+    """confirm_at 之前不判定触碰"""
+    lv = _mk_lv(price=100.0, side="support", band=0.5, confirm_at=30)
+    n = 40
+    close = np.full(n, 101.0)
+    high = np.full(n, 101.5)
+    low = np.full(n, 99.0)  # 全程触及位带
+    atr = np.full(n, 2.0)
+    res = level_touch_class(lv, close, high, low, atr, 0.5, 24, 0.5)
+    assert len(res["touch"]) == 0 or res["touch"][0] >= 30
