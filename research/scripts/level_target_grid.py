@@ -30,6 +30,7 @@ print(f"[load {time.time()-t0:.0f}s] {len(syms)} syms", flush=True)
 
 # ── 日线状态 (三分类 ±0.5ATR) ──
 daily_states = {}
+daily_times = {}
 for sym in syms:
     df4 = data[sym].get("4h")
     if df4 is None or len(df4) < 300:
@@ -41,13 +42,16 @@ for sym in syms:
         continue
     ma20d = daily["close"].rolling(20).mean()
     atr_d = (daily["high"] - daily["low"]).rolling(14).mean()
-    d = {}
+    d = []
     for ts, row in daily.iterrows():
         if pd.isna(ma20d[ts]) or pd.isna(atr_d[ts]) or atr_d[ts] <= 0:
+            d.append("中")
             continue
         dev = (row["close"] - ma20d[ts]) / atr_d[ts]
-        d[ts.date()] = "多" if dev > 0.5 else "空" if dev < -0.5 else "中"
-    daily_states[sym] = d
+        d.append("多" if dev > 0.5 else "空" if dev < -0.5 else "中")
+    daily_states[sym] = np.array(d, dtype=object)
+    # 无未来函数: 只用已收盘日线 (收盘 = 开盘 + 24h)
+    daily_times[sym] = daily.index.values.astype("datetime64[ns]") + np.timedelta64(24, "h")
 
 # ── 4H swing 极值 (重叠标志) ──
 sw4 = {}
@@ -132,12 +136,15 @@ for sym in syms:
     is_low = l <= pd.Series(l).rolling(5, center=True).min().values
     is_high = h >= pd.Series(h).rolling(5, center=True).max().values
 
-    # ── 采样点 + 9 状态 (向量化) ──
+    # ── 采样点 + 9 状态 (向量化, 无未来函数: 只用已收盘日线) ──
     i_s = np.arange(LOOKBACK + 50, n - W_MAX, 4)
-    ds_series = pd.Series(daily_states[sym])
-    dkey = np.array(pd.DatetimeIndex(idx1[i_s]).date)
-    sd_vals = ds_series.reindex(pd.Index(dkey)).values
-    ok_d = ~pd.isna(sd_vals)
+    st_daily = daily_states.get(sym)
+    if st_daily is None:
+        continue
+    close_daily = daily_times[sym]
+    jd = np.searchsorted(close_daily, idx1[i_s], side="right") - 1
+    ok_d = jd >= 0
+    sd_vals = np.where(ok_d, st_daily[np.clip(jd, 0, None)], "")
     t4s = np.searchsorted(idx4, idx1[i_s] - np.timedelta64(240, "m"), side="right") - 1
     ok4 = (t4s >= 20) & ~np.isnan(ma20_4[t4s]) & (atr4[t4s] > 0)
     dev4 = np.where(ok4, (c4[t4s] - ma20_4[t4s]) / atr4[t4s], 0.0)

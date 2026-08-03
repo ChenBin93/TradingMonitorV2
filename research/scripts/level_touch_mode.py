@@ -25,6 +25,7 @@ syms = list(data.keys())
 print(f"[load {time.time()-t0:.0f}s]", flush=True)
 
 daily_states = {}
+daily_times = {}
 for sym in syms:
     df4 = data[sym].get("4h")
     if df4 is None or len(df4) < 300:
@@ -36,13 +37,16 @@ for sym in syms:
         continue
     ma20d = daily["close"].rolling(20).mean()
     atr_d = (daily["high"] - daily["low"]).rolling(14).mean()
-    d = {}
+    d = []
     for ts, row in daily.iterrows():
         if pd.isna(ma20d[ts]) or pd.isna(atr_d[ts]) or atr_d[ts] <= 0:
+            d.append("中")
             continue
         dev = (row["close"] - ma20d[ts]) / atr_d[ts]
-        d[ts.date()] = "多" if dev > 0.5 else "空" if dev < -0.5 else "中"
-    daily_states[sym] = d
+        d.append("多" if dev > 0.5 else "空" if dev < -0.5 else "中")
+    daily_states[sym] = np.array(d, dtype=object)
+    # 收盘时间 = 日线开盘 + 24h → 查询只用已收盘日线 (无未来函数)
+    daily_times[sym] = daily.index.values.astype("datetime64[ns]") + np.timedelta64(24, "h")
 
 sw4 = {}
 for sym in syms:
@@ -107,10 +111,14 @@ for sym in syms:
     last_high = np.maximum.accumulate(np.where(is_high, idx_arr, -1))
 
     i_s = np.arange(LOOKBACK + 50, n - W_MAX, 4)
-    ds_series = pd.Series(daily_states[sym])
-    dkey = np.array(pd.DatetimeIndex(idx1[i_s]).date)
-    sd_vals = ds_series.reindex(pd.Index(dkey)).values
-    ok_d = ~pd.isna(sd_vals)
+    st_daily = daily_states.get(sym)
+    if st_daily is None:
+        continue
+    close_daily = daily_times[sym]
+    # 无未来函数: 只使用已收盘日线 (收盘时刻 <= 采样时刻)
+    jd = np.searchsorted(close_daily, idx1[i_s], side="right") - 1
+    ok_d = jd >= 0
+    sd_vals = np.where(ok_d, st_daily[np.clip(jd, 0, None)], "")
     t4s = np.searchsorted(idx4, idx1[i_s] - np.timedelta64(240, "m"), side="right") - 1
     ok4 = (t4s >= 20) & ~np.isnan(ma20_4[t4s]) & (atr4[t4s] > 0)
     dev4 = np.where(ok4, (c4[t4s] - ma20_4[t4s]) / atr4[t4s], 0.0)
@@ -139,7 +147,7 @@ for sym in syms:
         w_start = i - LOOKBACK
 
         # ── 支撑侧 (做多): 最近低点 ──
-        il = last_low[i]
+        il = last_low[max(0, i - 2)]  # 无未来函数: 极值需未来2根确认
         if il >= 0:
             d_lo = (entry - l[il]) / a
             if -0.5 <= d_lo <= 1.5:
@@ -182,7 +190,7 @@ for sym in syms:
                     long_key.append(mode * 6 + grp * 3 + q)
 
         # ── 阻力侧 (做空): 最近高点 ──
-        ih = last_high[i]
+        ih = last_high[max(0, i - 2)]  # 无未来函数
         if ih >= 0:
             d_hi = (h[ih] - entry) / a
             if -0.5 <= d_hi <= 1.5:

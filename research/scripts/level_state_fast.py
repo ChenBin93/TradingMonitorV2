@@ -19,6 +19,7 @@ syms = list(data.keys())
 
 daily_data = {}
 daily_states = {}
+daily_times = {}
 for sym in syms:
     df4 = data[sym].get("4h")
     if df4 is None or len(df4) < 300:
@@ -31,13 +32,15 @@ for sym in syms:
     daily_data[sym] = daily
     ma20d = daily["close"].rolling(20).mean()
     atr_d = (daily["high"] - daily["low"]).rolling(14).mean()
-    d = {}
+    d = []
     for ts, row in daily.iterrows():
         if pd.isna(ma20d[ts]) or pd.isna(atr_d[ts]) or atr_d[ts] <= 0:
+            d.append("中")
             continue
         dev = (row["close"] - ma20d[ts]) / atr_d[ts]
-        d[ts.date()] = "多" if dev > 0.5 else "空" if dev < -0.5 else "中"
-    daily_states[sym] = d
+        d.append("多" if dev > 0.5 else "空" if dev < -0.5 else "中")
+    daily_states[sym] = np.array(d, dtype=object)
+    daily_times[sym] = daily.index.values.astype("datetime64[ns]") + np.timedelta64(24, "h")
 
 LOOKBACK = 600
 
@@ -86,7 +89,10 @@ for sym in syms:
     c4 = df4["close"].values
     ma20_4 = pd.Series(c4).rolling(20).mean().values
     atr4 = _atr_series(df4)
-    ds = daily_states.get(sym, {})
+    st_daily = daily_states.get(sym)
+    close_daily = daily_times.get(sym)
+    if st_daily is None:
+        continue
 
     # 预计算 1H 极值 mask (向量化)
     is_low = l <= pd.Series(l).rolling(5, center=True).min().values
@@ -96,11 +102,12 @@ for sym in syms:
     # 简化: 采样点内检查 (开销小)
 
     for i in range(LOOKBACK + 50, n - 25, 4):
-        ts = pd.Timestamp(idx1[i])
-        sd = ds.get(ts.date())
-        if sd is None:
+        ts = idx1[i]
+        jd = int(np.searchsorted(close_daily, ts, side="right")) - 1
+        if jd < 0:
             continue
-        t4 = int(np.searchsorted(idx4, idx1[i] - np.timedelta64(240, "m"), side="right")) - 1
+        sd = st_daily[jd]
+        t4 = int(np.searchsorted(idx4, ts - np.timedelta64(240, "m"), side="right")) - 1
         if t4 < 20 or np.isnan(ma20_4[t4]):
             continue
         dev4 = (c4[t4] - ma20_4[t4]) / atr4[t4] if atr4[t4] > 0 else 0
