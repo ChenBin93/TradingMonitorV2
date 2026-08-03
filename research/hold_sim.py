@@ -31,18 +31,23 @@ class HoldTrade:
     reason: str   # stop / late / timeout
 
 
-def _initial_stop(entry_px, atr_i, sl_mode, pivot_lows, pl_idx, direction):
-    """初始止损价 (long: 止损线下; short: 止损线上)"""
+def _initial_stop(entry_px, atr_i, sl_mode, pivot_lows, pl_idx, direction, sl_mult=1.0):
+    """初始止损价 (long: 止损线下; short: 止损线上)
+
+    sl_mult: 止损距离倍数 (ATR×sl_mult) — 宽止损用于尾部捕捉实验
+    """
+    dist = atr_i * sl_mult
     if sl_mode == "atr":
-        return entry_px - atr_i if direction == "long" else entry_px + atr_i
+        return entry_px - dist if direction == "long" else entry_px + dist
     # hl: 最近已确认 pivot low (long) / pivot high (short)
     if pl_idx > 0:
         return pivot_lows[pl_idx - 1][1]
-    return entry_px - atr_i if direction == "long" else entry_px + atr_i  # 无 HL → ATR 兜底
+    return entry_px - dist if direction == "long" else entry_px + dist  # 无 HL → ATR 兜底
 
 
 def simulate_holds(close, high, low, atr, states, entries,
-                   direction="long", sl_mode="hl", exit_late=False, w=96):
+                   direction="long", sl_mode="hl", exit_late=False, w=96,
+                   sl_mult=1.0):
     """逐笔模拟 (事件式, 每笔独立 — 允许重叠, 与 A3 事件口径一致)
 
     返回 (trades: list[HoldTrade], 分年 R: dict[year, list[float]])
@@ -70,7 +75,8 @@ def simulate_holds(close, high, low, atr, states, entries,
         ph_i = np.searchsorted([p[0] for p in piv_highs], i - K, side="right")
         stop = _initial_stop(entry_px, atr[i], sl_mode,
                              piv_lows if direction == "long" else piv_highs,
-                             pl_i if direction == "long" else ph_i, direction)
+                             pl_i if direction == "long" else ph_i, direction,
+                             sl_mult=sl_mult)
         r_base = abs(stop - entry_px)
         if not np.isfinite(r_base) or r_base <= 0:
             # 兜底: pivot 低点与入场价重合 (低价币 tick 粒度) → 用 ATR 距离
