@@ -1,0 +1,57 @@
+
+═══ 真实 ═══
+H1 突破启动: 段起点±12根 confirmed 密度比 3.84 (n confirmed 165297036)  (>1=聚集于段起点)
+H3 窗口梯度 D1 沿趋势方向概率:
+   W    up_res    up_sup    dn_res    dn_sup
+   6     48.4%     48.5%     46.0%     45.9%
+  12     48.3%     48.6%     46.5%     46.2%
+  24     46.2%     46.5%     47.2%     46.9%
+  48     48.0%     48.1%     47.8%     47.4%
+  96     46.6%     46.7%     48.6%     48.3%
+H4 角色转换 D1 (过去60根内刚破 vs 未破):
+  role_dn_刚破_resistance    n=  80285 D1=46.2%
+  role_dn_刚破_support       n=  32298 D1=56.4%
+  role_dn_未破_resistance    n=   5052 D1=63.6%
+  role_dn_未破_support       n=  57467 D1=41.5%
+  role_up_刚破_resistance    n=  37166 D1=51.7%
+  role_up_刚破_support       n=  66721 D1=45.2%
+  role_up_未破_resistance    n=  40913 D1=41.2%
+  role_up_未破_support       n=   7266 D1=59.0%
+
+═══ GBM ═══
+H1 突破启动: 段起点±12根 confirmed 密度比 -6.50 (n confirmed 227322462)  (>1=聚集于段起点)
+H3 窗口梯度 D1 沿趋势方向概率:
+   W    up_res    up_sup    dn_res    dn_sup
+   6     50.5%     50.5%     50.3%     50.2%
+  12     50.6%     50.6%     50.2%     50.0%
+  24     50.5%     50.5%     49.9%     49.9%
+  48     50.0%     50.2%     50.6%     50.6%
+  96     49.6%     49.8%     50.8%     50.7%
+H4 角色转换 D1 (过去60根内刚破 vs 未破):
+  role_dn_刚破_resistance    n=  89002 D1=48.5%
+  role_dn_刚破_support       n=  43855 D1=57.0%
+  role_dn_未破_resistance    n=   6802 D1=68.8%
+  role_dn_未破_support       n=  53714 D1=44.2%
+  role_up_刚破_resistance    n=  45089 D1=58.1%
+  role_up_刚破_support       n=  90761 D1=49.2%
+  role_up_未破_resistance    n=  58186 D1=44.6%
+  role_up_未破_support       n=   6377 D1=69.0%
+
+── 净差 (真实−GBM) ──
+H1 密度比: 真实 3.84 vs GBM -6.50
+H3 ΔD1 窗口梯度:
+   W    up_res    up_sup    dn_res    dn_sup
+   6     -2.1%     -2.0%     -4.3%     -4.3%
+  12     -2.3%     -2.0%     -3.7%     -3.7%
+  24     -4.3%     -3.9%     -2.7%     -3.1%
+  48     -2.0%     -2.2%     -2.8%     -3.2%
+  96     -2.9%     -3.1%     -2.3%     -2.4%
+H4 ΔD1 (真实−GBM):
+  role_dn_刚破_resistance    Δ -2.3% (n 80285/89002)
+  role_dn_刚破_support       Δ -0.6% (n 32298/43855)
+  role_dn_未破_resistance    Δ -5.2% (n 5052/6802)
+  role_dn_未破_support       Δ -2.6% (n 57467/53714)
+  role_up_刚破_resistance    Δ -6.3% (n 37166/45089)
+  role_up_刚破_support       Δ -4.0% (n 66721/90761)
+  role_up_未破_resistance    Δ -3.4% (n 40913/58186)
+  role_up_未破_support       Δ -10.0% (n 7266/6377)
