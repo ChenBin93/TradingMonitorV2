@@ -28,17 +28,28 @@ def confirmed_pivots(df, k=K):
     """pivot 判定 (全样本计算; 但调用方只在 j+k <= t 时使用 — 确认时序保证无未来)
 
     严格定义: high[j] 严格大于左右各 k 根的高点 (相等不算, 避免相邻双 pivot)
+    向量化 (rolling max, 2026-08-03 优化 — 原逐点切片循环慢 ~3s/标的)
     """
     n = len(df)
     hi = df["high"].values
     lo = df["low"].values
     pivot_hi = np.zeros(n, bool)
     pivot_lo = np.zeros(n, bool)
-    for j in range(k, n - k):
-        if hi[j] > hi[j - k:j].max() and hi[j] > hi[j + 1:j + k + 1].max():
-            pivot_hi[j] = True
-        if lo[j] < lo[j - k:j].min() and lo[j] < lo[j + 1:j + k + 1].min():
-            pivot_lo[j] = True
+    if n <= 2 * k:
+        return pivot_hi, pivot_lo
+    import pandas as pd
+    sh = pd.Series(hi)
+    sl = pd.Series(lo)
+    rmax = sh.rolling(k, min_periods=1).max()
+    rmin = sl.rolling(k, min_periods=1).min()
+    left_max_h = rmax.shift(1).values   # max(hi[j-k:j])
+    right_max_h = rmax.shift(-k).values  # max(hi[j+1:j+k+1])
+    left_min_l = rmin.shift(1).values   # min(lo[j-k:j])
+    right_min_l = rmin.shift(-k).values  # min(lo[j+1:j+k+1])
+    idx = np.arange(n)
+    valid = (idx >= k) & (idx + k < n)
+    pivot_hi = valid & (hi > left_max_h) & (hi > right_max_h)
+    pivot_lo = valid & (lo < left_min_l) & (lo < right_min_l)
     return pivot_hi, pivot_lo
 
 
