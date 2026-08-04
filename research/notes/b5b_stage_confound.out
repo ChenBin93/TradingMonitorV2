@@ -1,0 +1,75 @@
+
+═══ 真实 ═══
+S1 阶段占比 (触碰 vs 全体 bar):
+  dn_accelerate    全体  12.2% | 触碰   5.8% (触碰占比-全体: -6.4%)
+  dn_early         全体  11.1% | 触碰   4.5% (触碰占比-全体: -6.6%)
+  dn_late          全体  27.7% | 触碰  15.4% (触碰占比-全体: -12.2%)
+  up_accelerate    全体   9.8% | 触碰   4.3% (触碰占比-全体: -5.5%)
+  up_early         全体  10.9% | 触碰   4.6% (触碰占比-全体: -6.4%)
+  up_late          全体  28.4% | 触碰  13.5% (触碰占比-全体: -14.8%)
+S2/S3 D1 沿趋势方向概率 (阶段 × 方向 × 侧):
+  dn_accelerate_resistance n=  19116 D1=47.2%
+  dn_accelerate_support  n=  20482 D1=46.5%
+  dn_early_resistance    n=  14884 D1=49.5%
+  dn_early_support       n=  15590 D1=49.6%
+  dn_late_resistance     n=  51528 D1=46.5%
+  dn_late_support        n=  53917 D1=46.2%
+  neu_x_resistance       n= 178267 D1=48.5%
+  neu_x_support          n= 176622 D1=49.1%
+  up_accelerate_resistance n=  15024 D1=45.6%
+  up_accelerate_support  n=  14031 D1=45.9%
+  up_early_resistance    n=  15915 D1=46.6%
+  up_early_support       n=  15201 D1=46.6%
+  up_late_resistance     n=  47425 D1=46.3%
+  up_late_support        n=  45003 D1=46.7%
+S4 触支撑 vs 触阻力 距 trend 段起点根数 (中位):
+  up_resistance: n=  78364 中位 3.0 根
+  up_support: n=  74235 中位 3.0 根
+
+═══ GBM ═══
+S1 阶段占比 (触碰 vs 全体 bar):
+  dn_accelerate    全体   8.4% | 触碰   3.0% (触碰占比-全体: -5.4%)
+  dn_early         全体   6.5% | 触碰   2.6% (触碰占比-全体: -3.9%)
+  dn_late          全体  34.5% | 触碰  12.2% (触碰占比-全体: -22.3%)
+  up_accelerate    全体   8.5% | 触碰   3.0% (触碰占比-全体: -5.4%)
+  up_early         全体   6.8% | 触碰   2.7% (触碰占比-全体: -4.2%)
+  up_late          全体  35.2% | 触碰  12.7% (触碰占比-全体: -22.5%)
+S2/S3 D1 沿趋势方向概率 (阶段 × 方向 × 侧):
+  dn_accelerate_resistance n=  15506 D1=49.7%
+  dn_accelerate_support  n=  16041 D1=50.2%
+  dn_early_resistance    n=  13975 D1=49.0%
+  dn_early_support       n=  13985 D1=49.4%
+  dn_late_resistance     n=  63955 D1=50.1%
+  dn_late_support        n=  66186 D1=50.5%
+  neu_x_resistance       n= 340961 D1=49.7%
+  neu_x_support          n= 337021 D1=49.5%
+  up_accelerate_resistance n=  16498 D1=49.7%
+  up_accelerate_support  n=  15672 D1=49.9%
+  up_early_resistance    n=  14676 D1=49.4%
+  up_early_support       n=  14029 D1=50.1%
+  up_late_resistance     n=  69260 D1=49.3%
+  up_late_support        n=  65814 D1=49.7%
+S4 触支撑 vs 触阻力 距 trend 段起点根数 (中位):
+  up_resistance: n= 100434 中位 4.0 根
+  up_support: n=  95515 中位 4.0 根
+
+── 净差 (真实−GBM) ──
+key                        n_真     n_G      ΔD1
+dn_accelerate_resistance   19116   15506    -2.5%
+dn_accelerate_support    20482   16041    -3.8%
+dn_early_resistance      14884   13975    +0.5%
+dn_early_support         15590   13985    +0.2%
+dn_late_resistance       51528   63955    -3.5%
+dn_late_support          53917   66186    -4.3%
+neu_x_resistance        178267  340961    -1.2%
+neu_x_support           176622  337021    -0.4%
+up_accelerate_resistance   15024   16498    -4.2%
+up_accelerate_support    14031   15672    -4.1%
+up_early_resistance      15915   14676    -2.9%
+up_early_support         15201   14029    -3.4%
+up_late_resistance       47425   69260    -3.1%
+up_late_support          45003   65814    -3.0%
+
+S4 段内位置中位 (真实 vs GBM):
+  up_resistance: 真实 3.0 vs GBM 4.0 根 (Δ -1.0)
+  up_support: 真实 3.0 vs GBM 4.0 根 (Δ -1.0)
