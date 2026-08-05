@@ -1458,24 +1458,28 @@ async def async_main():
                 for sym, item in warnings.items():
                     sym_short = sym.replace("-USDT-SWAP", "/USDT").split(":")[0]
                     dow = item.get("dow") or {}
-                    # 仓位建议 (每标的一次, 基于 4H 波动状态 + 段龄)
-                    vol4 = "中"
+                    # 仓位参考 (用户: 10X 杠杆 / 1H ATR 止损 / 本金 1% 风险 → 本金开仓比例)
+                    # pos_pct = 价格 × risk_pct / (1×ATR_1h × leverage) — 旧系统公式
+                    pos_ref = ""
                     try:
-                        from volatility_state import vol_z, vol_state
                         from market_phase import _atr_series
-                        df4 = cache.get_df(sym, "4h")
-                        if df4 is not None and len(df4) >= 60:
-                            vol4 = vol_state(vol_z(_atr_series(df4)))
+                        df1 = cache.get_df(sym, "1h")
+                        if df1 is not None and len(df1) >= 60:
+                            atr1 = float(_atr_series(df1)[-1]) or 0.0
+                            p1 = float(df1["close"].values[-1]) or 0.0
+                            if atr1 > 0 and p1 > 0:
+                                rp = config.get("account", {}).get("risk_pct", 1)
+                                lv = config.get("account", {}).get("leverage", 10)
+                                pos_pct = p1 * rp / (atr1 * lv)
+                                pos_ref = (f" 仓位参考{pos_pct:.0f}%({lv}x 1.0ATR)"
+                                           if pos_pct <= 100 else f"  ⚠波大参考{pos_pct:.0f}%")
                     except Exception:
                         pass
-                    from market_structure import position_mult
-                    pm = position_mult(vol4, dow.get("seg_age"), dow.get("seg_dir"))
-                    item["pos_mult"] = pm
                     for w in item["warns"]:
-                        ranked.append((w["level"], sym_short, w, dow, pm))
+                        ranked.append((w["level"], sym_short, w, dow, pos_ref))
                 ranked.sort(key=lambda x: (x[0], x[1]))
                 count = 0
-                for _, sym_short, w, dow, pm in ranked:
+                for _, sym_short, w, dow, pos_ref in ranked:
                     if count >= 12:
                         break
                     seg = ""
@@ -1484,7 +1488,7 @@ async def async_main():
                     if d in ("up", "down") and age is not None:
                         seg = f"·段{'↑' if d == 'up' else '↓'}{age}根"
                     icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(w["level"], "")
-                    lines_out.append(f"{sym_short} {icon}{w['tf']} {w['desc']}{seg} 仓位{pm}x")
+                    lines_out.append(f"{sym_short} {icon}{w['tf']} {w['desc']}{seg}{pos_ref}")
                     count += 1
                 feishu.send("\n".join(lines_out))
                 logger.info(f"Scan #{scan_count}: {len(warnings)} symbols with warnings, {count} pushed")

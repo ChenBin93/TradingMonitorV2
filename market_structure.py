@@ -114,17 +114,3 @@ def check_recent_touch(levels, df: pd.DataFrame | None):
             return lv
     return None
 
-
-def position_mult(vol_state_4h: str = "中", seg_age: int | None = None,
-                  seg_dir: str | None = None) -> float:
-    """仓位建议倍数 — 基准 1x = 风险 1% 账户 / 止损 1×ATR (用户: 不做方向预测, 只给风险参考)
-
-    波动调整 (用户观念: 低波动止损小, 同样风险可更大仓位):
-      低 → 1.5x | 中 → 1.0x | 高 → 0.5x
-    段龄调整 (A6c: 段龄 >25 根存活率 <50%, 老段降仓):
-      老段 (age>25) → ×0.7
-    """
-    m = {"低": 1.5, "中": 1.0, "高": 0.5}.get(vol_state_4h, 1.0)
-    if seg_dir in ("up", "down") and seg_age is not None and seg_age > 25:
-        m *= 0.7
-    return round(m, 1)
