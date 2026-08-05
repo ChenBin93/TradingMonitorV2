@@ -571,129 +571,81 @@ def do_scan(
     symbols: list[str],
     cache: KlineCache,
     config: dict,
-) -> tuple[list[Alert], dict[str, dict[str, dict]], dict]:
-    timeframes = config["timeframes"]
-    alerts: list[Alert] = []
-    all_ind: dict[str, dict[str, dict]] = {}
+) -> dict[str, dict]:
+    """新版扫描 (2026-08-04 大改造): 三柱 (关键位/波动/趋势状态) → 预警
 
-    rs_cfg = config.get("rs", {})
-    windows_cfg = rs_cfg.get("momentum_windows", {"5m": [5], "1h": [5], "4h": [5]})
+    无方向预测 (用户确认): 系统只描述"价格 vs 关键位 / 波动状态 /
+    趋势段状态", 方向由人判断。
+    """
+    from market_phase import _atr_series
+    from key_levels import (detect_levels, bollinger_bands, level_relation,
+                            recent_touches, break_nearest)
+    from volatility_state import vol_z, vol_state, squeeze, vol_start
+    from early_warning import compose as compose_warns
+    import market_structure as ms_mod
 
-    # ── 第一遍：收集所有 TF 的指标 + RS 数据 ──
-    tf_close: dict[str, dict[str, float | None]] = {tf: {} for tf in timeframes}
-    tf_prev_maps: dict[str, list[dict[str, float | None]]] = {tf: [] for tf in timeframes}
-    tf_atr: dict[str, dict[str, float | None]] = {tf: {} for tf in timeframes}
-
+    warnings: dict[str, dict] = {}
     for sym in symbols:
-        tf_ind: dict[str, dict] = {}
-        for tf in timeframes:
-            df = cache.get_df(sym, tf)
-            if len(df) < 30:
-                continue
-            ind_params = config["indicators"].get(tf, config["indicators"]["5m"])
-            ind = compute_indicators(df, ind_params)
-            if ind:
-                tf_ind[tf] = ind
-
-        if not tf_ind:
-            continue
-        all_ind[sym] = tf_ind
-
-        for tf in timeframes:
-            ind = tf_ind.get(tf, {})
-            if not ind:
-                continue
-            tf_close[tf][sym] = ind.get("close")
-            tf_atr[tf][sym] = ind.get("atr_rs")
-            df = ind.get("df")
-            if df is None:
-                continue
-            lookbacks = windows_cfg.get(tf, [5])
-            if len(tf_prev_maps[tf]) == 0:
-                tf_prev_maps[tf] = [{} for _ in lookbacks]
-            for i, w in enumerate(lookbacks):
-                if len(df) > w:
-                    tf_prev_maps[tf][i][sym] = df["close"].iloc[-w - 1]
-
-    # ── 多周期 RS 计算 ──
-    btc_symbol = "BTC/USDT:USDT"
-    rs_by_tf: dict[str, dict[str, object]] = {}
-    for tf in timeframes:
-        lookbacks = windows_cfg.get(tf, [5])
-        btc_close = tf_close[tf].get(btc_symbol)
-        btc_atr = tf_atr[tf].get(btc_symbol)
-        btc_prev_list = []
-        for i in range(len(lookbacks)):
-            if i < len(tf_prev_maps[tf]):
-                btc_prev_list.append(tf_prev_maps[tf][i].get(btc_symbol))
-            else:
-                btc_prev_list.append(None)
-        rs_by_tf[tf] = compute_rs(tf_close[tf], tf_prev_maps[tf], tf_atr[tf],
-                                  btc_close, btc_prev_list, btc_atr, lookbacks)
-
-    # ── 汇总每个 symbol 的多周期 RS ──
-    rs_scores_all: dict[str, dict[str, dict]] = {}
-    for sym in all_ind:
-        rs_scores_all[sym] = {}
-        for tf in timeframes:
-            r = rs_by_tf[tf].get(sym)
-            if r:
-                rs_scores_all[sym][tf] = {"score": r.rs_score, "level": r.rs_level,
-                                            "zscore": r.rs_zscore}
-
-    # ── 第二遍：逐 TF 检查信号（1H/4H 仅做方向锚）──
-    for sym, tf_ind in all_ind.items():
-        sym_bias = _symbol_bias(tf_ind)
-        for tf, ind in tf_ind.items():
-            if tf in ("1h", "4h"):
-                continue
-            direction = get_direction(ind)
-            regime = get_regime(ind)
-            ind_1h = tf_ind.get("1h", {})
-            ind_4h = tf_ind.get("4h", {})
-            state = SignalState(
-                symbol=sym, timeframe=tf, ind=ind,
-                regime=regime, direction=direction,
-                rs_scores=rs_scores_all.get(sym, {}),
-                ind_1h=ind_1h, ind_4h=ind_4h,
-            )
-
-            for sig_def in SIGNALS:
-                adx_val = ind.get("adx", 0) or 0
-                if sig_def.gate == "trend" and adx_val < 25:
+        try:
+            df_1h = cache.get_df(sym, "1h")
+            df_4h = cache.get_df(sym, "4h")
+            tfs: dict[str, dict] = {}
+            for tf, df in (("1h", df_1h), ("4h", df_4h)):
+                if df is None or len(df) < 60:
                     continue
-                if sig_def.gate == "range" and adx_val >= 20:
-                    continue
+                atr = _atr_series(df)
+                price = float(df["close"].values[-1])
+                atr_now = float(atr[-1]) or 1.0
+                n = len(df)
+                levels = detect_levels(df, atr)
+                ma, up, lo_ = bollinger_bands(df)
+                z = vol_z(atr)
+                vstate = vol_state(z)
+                bbw = np.abs(up - lo_) / np.maximum(np.abs(ma), 1e-9)
+                rel = level_relation(price, levels, atr_now, n - 1)
+                tfs[tf] = {
+                    "price": price,
+                    "atr": atr_now,
+                    "rel": rel,
+                    "touches": recent_touches(levels, df["high"].values,
+                                              df["low"].values, n - 1),
+                    "breaks": break_nearest(rel, df["close"].values, atr, n - 1),
+                    "bb": (float(ma[-1]), float(up[-1]), float(lo_[-1])),
+                    "vol_state": vstate,
+                    "squeeze": bool(squeeze(bbw)),
+                    "vol_start": bool(vol_start(atr)),
+                }
+            if df_4h is not None and len(df_4h) >= 60:
                 try:
-                    state.params = {**sig_def.params, "bias": sym_bias}
-                    result = sig_def.check(state)
-                    if result:
-                        alert = Alert(
-                            symbol=sym, timeframe=tf,
-                            signal_type=sig_def.id, signal_name=sig_def.name,
-                            regime=regime, direction=result.get("direction", direction),
-                            severity=result.get("severity", "medium"),
-                            confidence=result.get("confidence", 0.5),
-                            evidence=result.get("evidence", ""),
-                            details=result,
-                        )
-                        alerts.append(alert)
-                except Exception as e:
-                    logger.debug(f"Signal check error {sig_def.id} {sym}: {e}")
-
-        # ── 富化 ──
-        sym_alerts = [a for a in alerts if a.symbol == sym]
-        rs_dict = rs_scores_all.get(sym, {})
-        if rs_dict:
-            for alert in sym_alerts:
-                alert.details.setdefault("rs_scores", rs_dict)
-        dow_info = market_structure.compute_dow_info(
-            (tf_ind.get("4h") or {}).get("df")) if sym_alerts else {}
-        for alert in sym_alerts:
-            _enrich_alert(alert, tf_ind, sym, sym_alerts, dow_info)
-
-    return alerts, all_ind, rs_scores_all
-
+                    daily = ms_mod.resample_daily(df_4h)
+                    if len(daily) >= 30:
+                        datr = _atr_series(daily)
+                        dprice = float(daily["close"].values[-1])
+                        datr_now = float(datr[-1]) or 1.0
+                        dn = len(daily)
+                        tfs["日线"] = {
+                            "price": dprice,
+                            "atr": datr_now,
+                            "rel": level_relation(dprice, detect_levels(daily, datr),
+                                                   datr_now, dn - 1),
+                            "touches": [],
+                            "breaks": [],
+                            "bb": tuple(float(x) for x in bollinger_bands(daily)[-3:]),
+                            "vol_state": vol_state(vol_z(datr)),
+                            "squeeze": False,
+                            "vol_start": False,
+                        }
+                except Exception:
+                    pass
+            if not tfs:
+                continue
+            dow4h = ms_mod.compute_dow_info(df_4h)
+            warns = compose_warns(sym, tfs)
+            if warns:
+                warnings[sym] = {"warns": warns, "dow": dow4h}
+        except Exception as e:
+            logger.debug(f"scan warn error {sym}: {e}")
+    return warnings
 
 def _level_quality(lvl, overlap4h: bool) -> str:
     """关键位质量分 (研究: age 200-400最优 + touch≥3 + 4H重叠 → 单调 53.8→62.1%)"""
@@ -1453,15 +1405,8 @@ async def async_main():
         pos_thread = threading.Thread(target=pm.run, daemon=True, name="position")
         pos_thread.start()
 
-    alert_filter = AlertFilter(
-        silence_minutes=config.get("alert", {}).get("dedup_minutes", 30),
-        min_confidence=config.get("alert", {}).get("min_confidence", 0.65),
-    )
     scan_count = 0
-    warn_buf: dict[str, list[dict]] = {}
-    brew_buf: dict[str, list[dict]] = {}
     first_scan = True
-    signal_pool = SignalPool()
 
     def _wait_next_5m():
         nonlocal first_scan
@@ -1503,145 +1448,38 @@ async def async_main():
             if len(active_symbols) < len(symbols):
                 logger.debug(f"Off-market hours: {len(symbols) - len(active_symbols)} US stocks skipped")
             await _refresh_cache_if_stale()
-            alerts, all_ind, rs_scores_all = do_scan(active_symbols, cache, config)
 
-            # ── 拥挤度: BTC 资金费率 ──
-            btc_funding = None
-            try:
-                fr = okx.fetch_funding_rate("BTC/USDT:USDT")
-                if fr:
-                    btc_funding = fr["funding_rate"] * 100
-            except Exception:
-                pass
+            # ── 三柱扫描 → 预警 (无方向预测) ──
+            warnings = do_scan(active_symbols, cache, config)
 
-            # ── RS 分布: 标准差判断资金分化 ──
-            rs_5m_vals = [rs_scores_all[s].get("5m", {}).get("score", 0) for s in rs_scores_all if s in rs_scores_all]
-            rs_dispersion = round(float(np.std(rs_5m_vals)), 1) if len(rs_5m_vals) > 5 else 0.0
-
-            # 注入到 alert.details
-            for a in alerts:
-                a.details["btc_funding"] = btc_funding
-                a.details["rs_dispersion"] = rs_dispersion
-
-            # ── RS 加速度 ──
-            for a in alerts:
-                rs5 = (a.details.get("rs_scores") or {}).get("5m", {}).get("score", 0)
-                if rs5:
-                    a.details["rs_delta"] = signal_pool.get_rs_delta(a.symbol, rs5)
-
-            apply_mtf_boost(alerts)
-
-            for a in alerts:
-                ind = all_ind.get(a.symbol, {}).get(a.timeframe, {})
-                a.confidence = alert_filter._boost_confidence(a, ind)
-
-            filtered = alert_filter.filter(alerts)
-
-            signal_pool.update(filtered)
-            active = signal_pool.get_active()
-
-            ranks = rank_symbols(alerts, all_ind) if active else []
-
-            # ── 市场状态 (无论有无信号都推) ──
-            ms = compute_market_state(all_ind)
-            bias_icon = "🔺" if ms["bias"] == "long" else "🔻" if ms["bias"] == "short" else "⏸"
-            bias_text = "做多" if ms["bias"] == "long" else "做空" if ms["bias"] == "short" else "观望"
-
-            ms_line = f"━━━ 市场状态 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()} ━━━\n"
-            ms_line += f"{ms['desc']}\n"
-            if ms.get("phase_line"):
-                ms_line += f"{ms['phase_line']}\n"
-            if ms.get("power_line"):
-                ms_line += f"{ms['power_line']}\n"
-            ms_line += f"{ms['h1_line']}"
-            if ms.get("ma20_line"):
-                ms_line += f"\n距MA20: {ms['ma20_line']}"
-            if ms.get("sr_1h"):
-                ms_line += f"\n1H {ms['sr_1h']}"
-            if ms.get("sr_4h"):
-                ms_line += f"\n4H {ms['sr_4h']}"
-            breadth_parts = [b for b in [ms.get("breadth_1h"), ms.get("breadth_4h")] if b]
-            if breadth_parts:
-                ms_line += f"\n" + " · ".join(breadth_parts)
-            # ── BTC 4H 顺势距离 (监控参考) ──
-            btc_ind = all_ind.get("BTC/USDT:USDT", {})
-            btc_4h = btc_ind.get("4h", {})
-            if btc_4h and btc_4h.get("ma20") and btc_4h.get("atr"):
-                btc_dist = (btc_4h.get("close", 0) - btc_4h.get("ma20", 0)) / (btc_4h.get("atr") or 1)
-                ms_line += f"\nBTC距4H MA20: {btc_dist:+.2f} ATR"
-            ms_line += f"\n→ {bias_icon}倾向{bias_text}({ms['confidence']}%) {ms['reason']}"
-            if btc_funding is not None:
-                crowd = "🟢安全" if abs(btc_funding) < 0.03 else "🟠拥挤" if abs(btc_funding) < 0.07 else "🔴极端"
-                ms_line += f" · 费率:{btc_funding:+.3f}%{crowd}"
-            if rs_dispersion > 5:
-                ms_line += f" · RS分化:σ={rs_dispersion:.0f}"
-            feishu.send(ms_line)
-
-            if active:
-                buckets: dict[str, list[Alert]] = {}
-                for a in active:
-                    cat = _symbol_category(a.symbol)
-                    buckets.setdefault(cat, []).append(a)
-
-                for cat, cat_alerts in buckets.items():
-                    cat_label = _CAT_LABELS.get(cat, cat)
-                    cat_ranks = [r for r in ranks if _symbol_category(r.symbol) == cat]
-                    report = format_consolidated_report(
-                        cat_alerts, cat_ranks, len(alerts), len(symbols), scan_start,
-                        category_label=cat_label)
-                    feishu.send(report)
-                new_count = sum(1 for a in active if a.details.get("is_fresh"))
-                persist_count = len(active) - new_count
-                logger.info(f"Scan #{scan_count}: {len(active)} alerts ({new_count} new + {persist_count} persisted), {len(ranks)} ranked ({'/'.join(f'{k}:{len(v)}' for k,v in buckets.items())})")
-
-                # ── 酝酿报告 ──
-                if brew_buf:
-                    brew_lines = [f"\n📋 酝酿中:"]
-                    count = 0
-                    for sym, items in brew_buf.items():
-                        sym_short = sym.replace("-USDT-SWAP", "/USDT").split(":")[0]
-                        for b in items:
-                            missing_str = " 缺"+",".join(b.get("missing", [])) if b.get("missing") else ""
-                            detail = " "+b.get("detail", "") if b.get("detail") else ""
-                            brew_lines.append(f"{sym_short}  ⚠{b['signal_name']}({b['met']}/{b['total']}){missing_str}{detail}")
-                            count += 1
-                            if count >= 5: break
-                        if count >= 5: break
-                    feishu.send("\n".join(brew_lines))
-                    brew_buf.clear()
+            if warnings:
+                lines_out = [f"━━━ ⚡预警 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()} ━━━"]
+                ranked = []
+                for sym, item in warnings.items():
+                    sym_short = sym.replace("-USDT-SWAP", "/USDT").split(":")[0]
+                    dow = item.get("dow") or {}
+                    for w in item["warns"]:
+                        ranked.append((w["level"], sym_short, w, dow))
+                ranked.sort(key=lambda x: (x[0], x[1]))
+                count = 0
+                for _, sym_short, w, dow in ranked:
+                    if count >= 12:
+                        break
+                    seg = ""
+                    d = dow.get("seg_dir")
+                    age = dow.get("seg_age")
+                    if d in ("up", "down") and age is not None:
+                        seg = f"·段{'↑' if d == 'up' else '↓'}{age}根"
+                    icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(w["level"], "")
+                    lines_out.append(f"{sym_short} {icon}{w['tf']} {w['desc']}{seg}")
+                    count += 1
+                feishu.send("\n".join(lines_out))
+                logger.info(f"Scan #{scan_count}: {len(warnings)} symbols with warnings, {count} pushed")
             else:
-                logger.info(f"Scan #{scan_count}: 0 push alerts (raw {len(alerts)} signals scanned)")
-
-            # ── 预警收集 ──
-            for sym, tf_ind in all_ind.items():
-                ind_5m = tf_ind.get("5m", {})
-                if not ind_5m:
-                    continue
-                state = SignalState(
-                    symbol=sym, timeframe="5m", ind=ind_5m,
-                    regime=get_regime(ind_5m), direction=get_direction(ind_5m),
-                    rs_scores=rs_scores_all.get(sym, {}),
-                    ind_1h=tf_ind.get("1h", {}), ind_4h=tf_ind.get("4h", {}),
-                )
-                ws = check_warnings(state)
-                if ws:
-                    warn_buf[sym] = ws
-                bs = check_brewing(state)
-                if bs:
-                    brew_buf.setdefault(sym, []).extend(bs)
-
-            # ── 30m 整点推送预警 (首次扫描立即推) ──
-            now = _bj_now()
-            if now.minute % 30 == 0 or scan_count == 1:
-                w_report = format_warning_report(warn_buf, now)
-                if w_report:
-                    feishu.send(w_report)
-                    logger.info(f"Warnings pushed: {sum(len(v) for v in warn_buf.values())} items")
-                warn_buf.clear()
+                logger.info(f"Scan #{scan_count}: no warnings")
 
         except Exception as e:
             logger.error(f"Scan #{scan_count} error: {e}")
-
 
 def main():
     loop = asyncio.new_event_loop()

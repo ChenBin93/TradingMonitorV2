@@ -31,7 +31,7 @@ def _survival(k: int) -> float:
     return float(np.interp(k, ks, vs))
 
 
-def _resample_daily(df: pd.DataFrame) -> pd.DataFrame:
+def resample_daily(df: pd.DataFrame) -> pd.DataFrame:
     """4H → 日线 (每 6 根 4H = 1 日线 bar; 日线收盘于当日最后一根 4H 之后)"""
     idx = df.index
     day = np.array([ts.date() for ts in idx])
@@ -68,7 +68,7 @@ def compute_dow_info(df_4h: pd.DataFrame | None) -> dict:
             info["seg_pos"] = (n - 1 - s["start"]) / max(1, s["bars"])
             break
     try:
-        daily = _resample_daily(df_4h)
+        daily = resample_daily(df_4h)
         dd = dow_segments(daily)
         daily_dir = str(dd["states"][-1])
         info["daily_dir"] = daily_dir
