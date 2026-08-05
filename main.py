@@ -623,6 +623,7 @@ def do_scan(
                         dprice = float(daily["close"].values[-1])
                         datr_now = float(datr[-1]) or 1.0
                         dn = len(daily)
+                        _dma, _dup, _dlo = bollinger_bands(daily)
                         tfs["日线"] = {
                             "price": dprice,
                             "atr": datr_now,
@@ -630,7 +631,7 @@ def do_scan(
                                                    datr_now, dn - 1),
                             "touches": [],
                             "breaks": [],
-                            "bb": tuple(float(x) for x in bollinger_bands(daily)[-3:]),
+                            "bb": (float(_dma[-1]), float(_dup[-1]), float(_dlo[-1])),
                             "vol_state": vol_state(vol_z(datr)),
                             "squeeze": False,
                             "vol_start": False,
