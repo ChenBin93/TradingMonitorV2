@@ -3,7 +3,7 @@
 cd /root/workspace/project/TradingMonitor/v2
 
 # 杀掉所有旧进程
-for pid in $(ps aux | grep "python3 main.py" | grep -v grep | awk '{print $2}'); do
+for pid in $(ps aux | grep "python3 .*main.py" | grep -v grep | awk '{print $2}'); do
     kill -9 $pid 2>/dev/null
 done
 sleep 2
