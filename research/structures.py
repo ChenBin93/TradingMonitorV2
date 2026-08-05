@@ -151,3 +151,162 @@ def structural_states(df, k=K):
         states[t] = f"down:{stage}"
 
     return states
+
+
+def dow_segments(df, k=K):
+    """道氏趋势段 + 回撤事件 (v2 扩展, 无未来函数)
+
+    道氏视角 (用户): 上升趋势 = 高点和低点持续抬升 (HH+HL); 趋势结束 =
+    价格打破前低 (跌破最近确认 HL); 之后进入震荡 (range) 或反转。
+
+    基于 v1 状态机扩展:
+      - up 段内跟踪 HH/HL 序列 (pivot 确认即可用, K=3)
+      - 回撤事件 = 确认新 HL (up) / 新 LH (down) 时记录 (深度/时长)
+      - 段生命周期: 起止 bar/方向/时长/幅度 (ATR 归一)/HH·HL 计数
+      - 破位参照: 最近确认 HL (道氏) 而非任意 pivot low — 比 v1 严格
+
+    返回 dict:
+      states:  逐 bar "range/up/down/warmup" (段级, 不含阶段)
+      segs:    list[dict] start/end/bars/direction/amp_atr/n_hh/n_hl
+      retraces: list[dict] bar/direction/depth_atr/dur_bars (HL/LH 确认点)
+    """
+    n = len(df)
+    hi = df["high"].values
+    lo = df["low"].values
+    cl = df["close"].values
+    atr = _atr_series(df)
+    pivot_hi, pivot_lo = confirmed_pivots(df, k)
+
+    ph = [j for j in range(n) if pivot_hi[j]]
+    pl = [j for j in range(n) if pivot_lo[j]]
+
+    states = np.full(n, "warmup", dtype=object)
+    segs, retraces = [], []
+    iph = ipl = 0
+    last_ph = last_pl = None
+    phase = "range"
+    seg = None
+    peak_pos = peak_val = None       # 段内最高 pivot high (up)
+    trough_pos = trough_val = None   # 段内最低 pivot low (down)
+    last_hl = None                   # 最近确认 HL 值 (up 段回撤低点序列)
+    last_lh = None                   # 最近确认 LH 值 (down 段)
+    n_hh = n_hl = 0
+    ref = 0.0
+    break_ts = -1
+    proc_ph = proc_pl = -1
+
+    def close_seg(end):
+        nonlocal seg, peak_pos, peak_val, trough_pos, trough_val
+        nonlocal last_hl, last_lh, n_hh, n_hl
+        if seg is not None:
+            if seg["direction"] == "up":
+                amp = (peak_val - trough_val) if (peak_val and trough_val) else 0.0
+            else:
+                amp = (trough_val - peak_val) if (peak_val and trough_val) else 0.0
+            seg.update(end=end, bars=end - seg["start"] + 1,
+                       amp_atr=amp / max(1e-9, atr[seg["start"]]),
+                       n_hh=n_hh, n_hl=n_hl)
+            segs.append(seg)
+            seg = None
+        peak_pos = peak_val = trough_pos = trough_val = None
+        last_hl = last_lh = None
+        n_hh = n_hl = 0
+
+    for t in range(n):
+        while iph < len(ph) and ph[iph] + k <= t:
+            last_ph = (ph[iph], hi[ph[iph]])
+            iph += 1
+        while ipl < len(pl) and pl[ipl] + k <= t:
+            last_pl = (pl[ipl], lo[pl[ipl]])
+            ipl += 1
+
+        if last_ph is None or last_pl is None or not np.isfinite(atr[t]) or atr[t] <= 0:
+            states[t] = "warmup"
+            continue
+
+        if phase == "range":
+            if cl[t] > last_ph[1]:
+                phase = "up"
+                seg = dict(start=t, direction="up")
+                ref, break_ts = last_ph[1], t
+                proc_ph = proc_pl = -1
+            elif cl[t] < last_pl[1]:
+                phase = "down"
+                seg = dict(start=t, direction="down")
+                ref, break_ts = last_pl[1], t
+                proc_ph = proc_pl = -1
+            states[t] = "range"
+            continue
+
+        if phase == "up":
+            break_level = last_hl if last_hl is not None else (
+                last_pl[1] if last_pl is not None else None)
+            if break_level is not None and cl[t] < break_level:
+                close_seg(t)
+                phase = "range"
+                states[t] = "range"
+                continue
+            if seg is None:  # 理论不可达, 防御
+                phase = "range"
+                states[t] = "range"
+                continue
+            if last_ph is not None and last_ph[0] > break_ts and last_ph[0] > proc_ph:
+                proc_ph = last_ph[0]
+                v = last_ph[1]
+                if peak_val is None or v > peak_val:
+                    peak_val, peak_pos = v, last_ph[0]
+                if v > ref:
+                    n_hh += 1
+            if last_pl is not None and last_pl[0] > break_ts and last_pl[0] > proc_pl:
+                proc_pl = last_pl[0]
+                v = last_pl[1]
+                if last_hl is None or v > last_hl:
+                    # 新 HL: 回撤事件
+                    if last_hl is not None and peak_val is not None and peak_pos is not None:
+                        retraces.append(dict(bar=last_pl[0], direction="up",
+                                             depth_atr=(peak_val - v) / max(1e-9, atr[last_pl[0]]),
+                                             dur_bars=last_pl[0] - peak_pos,
+                                             peak_val=peak_val))
+                    last_hl = v
+                    if trough_val is None or v < trough_val:
+                        trough_val, trough_pos = v, last_pl[0]
+                    n_hl += 1
+            states[t] = "up"
+            continue
+
+        # down
+        break_level = last_lh if last_lh is not None else (
+            last_ph[1] if last_ph is not None else None)
+        if break_level is not None and cl[t] > break_level:
+            close_seg(t)
+            phase = "range"
+            states[t] = "range"
+            continue
+        if seg is None:
+            phase = "range"
+            states[t] = "range"
+            continue
+        if last_pl is not None and last_pl[0] > break_ts and last_pl[0] > proc_pl:
+            proc_pl = last_pl[0]
+            v = last_pl[1]
+            if trough_val is None or v < trough_val:
+                trough_val, trough_pos = v, last_pl[0]
+            if v < ref:
+                n_hl += 1
+        if last_ph is not None and last_ph[0] > break_ts and last_ph[0] > proc_ph:
+            proc_ph = last_ph[0]
+            v = last_ph[1]
+            if last_lh is None or v < last_lh:
+                if last_lh is not None and trough_val is not None and trough_pos is not None:
+                    retraces.append(dict(bar=last_ph[0], direction="down",
+                                         depth_atr=(v - trough_val) / max(1e-9, atr[last_ph[0]]),
+                                         dur_bars=last_ph[0] - trough_pos,
+                                         trough_val=trough_val))
+                last_lh = v
+                if peak_val is None or v > peak_val:
+                    peak_val, peak_pos = v, last_ph[0]
+                n_hh += 1
+        states[t] = "down"
+
+    close_seg(n - 1)
+    return dict(states=states, segs=segs, retraces=retraces)
