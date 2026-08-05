@@ -1491,8 +1491,9 @@ async def async_main():
                     icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(w["level"], "")
                     lines_out.append(f"{sym_short} {icon}{w['tf']} {w['desc']}{seg}{pos_ref}")
                     count += 1
-                feishu.send("\n".join(lines_out))
-                logger.info(f"Scan #{scan_count}: {len(warnings)} symbols with warnings, {count} pushed")
+                push_text = "\n".join(lines_out)
+                feishu.send(push_text)
+                logger.info(f"Scan #{scan_count}: {len(warnings)} symbols with warnings, {count} pushed\n{push_text}")
             else:
                 logger.info(f"Scan #{scan_count}: no warnings")
 
