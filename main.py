@@ -19,6 +19,7 @@ from support_resistance import find_swing_levels, find_recent_extremes, get_near
 from volume_profile import compute_volume_profile, get_nearest_nodes
 from market_state import compute_market_state, scene_of, SCENE_WR, SCENE_BOOST
 from relative_strength import compute_rs
+import market_structure
 
 BJ_TZ = timezone(timedelta(hours=8))
 
@@ -686,8 +687,10 @@ def do_scan(
         if rs_dict:
             for alert in sym_alerts:
                 alert.details.setdefault("rs_scores", rs_dict)
+        dow_info = market_structure.compute_dow_info(
+            (tf_ind.get("4h") or {}).get("df")) if sym_alerts else {}
         for alert in sym_alerts:
-            _enrich_alert(alert, tf_ind, sym, sym_alerts)
+            _enrich_alert(alert, tf_ind, sym, sym_alerts, dow_info)
 
     return alerts, all_ind, rs_scores_all
 
@@ -708,7 +711,9 @@ def _level_quality(lvl, overlap4h: bool) -> str:
     return "高" if sc >= 3 else "中" if sc >= 1.5 else "低"
 
 
-def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] | None = None):
+def _enrich_alert(alert: Alert, tf_ind: dict, sym: str,
+                  sym_alerts: list[Alert] | None = None,
+                  dow_info: dict | None = None):
     check = []
 
     # ── 信号共振 ──
@@ -891,6 +896,36 @@ def _enrich_alert(alert: Alert, tf_ind: dict, sym: str, sym_alerts: list[Alert] 
                 check.append("?无阻力")
         else:
             check.append("?边界")
+
+        # ── 第一批: 市场结构标签 (A6 道氏段 + B 关键位, 2026-08-04, 描述性) ──
+        if dow_info:
+            seg_dir = dow_info.get("seg_dir", "")
+            age = dow_info.get("seg_age")
+            if seg_dir in ("up", "down") and age is not None:
+                surv = dow_info.get("seg_surv", 1.0)
+                seg_lbl = "上升" if seg_dir == "up" else "下降"
+                alert.meta["4h_seg"] = f"{seg_lbl}段{age}根(存活{surv:.0%})"
+                check.append(f"4H段{age}根")
+                if age > 25:
+                    check.append("⚠4H段老")
+                pos = dow_info.get("seg_pos")
+                if pos is not None:
+                    pos_lbl = "早" if pos < 0.33 else ("晚" if pos > 0.67 else "中")
+                    alert.meta["seg_pos"] = pos_lbl
+                    if pos_lbl == "晚":
+                        check.append("?段晚期")
+            cons = dow_info.get("daily_cons", "")
+            if cons:
+                alert.meta["daily_cons"] = cons
+                check.append(f"{'✓' if cons == '顺风' else '?'}{cons}")
+        # B1 区间内 (简化: 成对位带间距 ≤2.5×ATR) / B2 触碰释放
+        if market_structure.check_range_bounds(levels, current_price, atr_1h):
+            alert.meta["in_range"] = "区间"
+            check.append("✓区间")
+        touch = market_structure.check_recent_touch(levels, df_1h)
+        if touch is not None:
+            alert.meta["recent_touch"] = f"{touch.side}触"
+            check.append("⚡触位")
 
     # ── SL/TP/RR (3年1094天验证参数: 按场景给可达目标, SL下限1×1H ATR防RR虚高) ──
     entry_price = current_price or ind_base.get("close") or 0
