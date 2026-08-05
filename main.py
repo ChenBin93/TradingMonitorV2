@@ -585,12 +585,28 @@ def do_scan(
     import market_structure as ms_mod
 
     warnings: dict[str, dict] = {}
+
+    def _clean_df(df):
+        """防御: 时间戳排序 + 去重 (KlineCache 曾有乱序/重复污染) — 返回 (df, dup_count, last_ts)"""
+        if df is None or len(df) == 0:
+            return df, 0, None
+        d = df.copy()
+        if "timestamp" in d.columns:
+            d = d.sort_values("timestamp")
+            dup = int(d["timestamp"].duplicated().sum())
+            d = d.drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+        else:
+            dup = 0
+        return d, dup, (d["timestamp"].iloc[-1] if len(d) and "timestamp" in d.columns else None)
+
     for sym in symbols:
         try:
             df_1h = cache.get_df(sym, "1h")
             df_4h = cache.get_df(sym, "4h")
             tfs: dict[str, dict] = {}
+            diag: dict[str, str] = {}
             for tf, df in (("1h", df_1h), ("4h", df_4h)):
+                df, dup, last_ts = _clean_df(df)
                 if df is None or len(df) < 60:
                     continue
                 atr = _atr_series(df)
@@ -615,6 +631,9 @@ def do_scan(
                     "squeeze": bool(squeeze(bbw)),
                     "vol_start": bool(vol_start(atr)),
                 }
+                diag[tf] = (f"p{price:.5g} bb({float(ma[-1]):.5g},{float(up[-1]):.5g},"
+                            f"{float(lo_[-1]):.5g}) len{len(df)} dup{dup} "
+                            f"last{str(last_ts)[:19]}")
             if df_4h is not None and len(df_4h) >= 60:
                 try:
                     daily = ms_mod.resample_daily(df_4h)
@@ -643,7 +662,7 @@ def do_scan(
             dow4h = ms_mod.compute_dow_info(df_4h)
             warns = compose_warns(sym, tfs)
             if warns:
-                warnings[sym] = {"warns": warns, "dow": dow4h}
+                warnings[sym] = {"warns": warns, "dow": dow4h, "diag": diag}
         except Exception as e:
             logger.debug(f"scan warn error {sym}: {e}")
     return warnings
@@ -1386,6 +1405,14 @@ async def async_main():
     def on_kline(sym: str, tf: str, candle: Candle):
         cache.update(sym, tf, candle)
 
+    rebuild_flag = {"need": False}
+
+    def _on_ws_reconnect():
+        rebuild_flag["need"] = True
+        logger.warning("WS reconnected: cache rebuild queued")
+
+    okx.set_on_reconnect(_on_ws_reconnect)
+
     try:
         await okx.ws_connect(symbols, timeframes, on_kline)
     except Exception as e:
@@ -1448,6 +1475,26 @@ async def async_main():
             active_symbols = _active_symbols(symbols)
             if len(active_symbols) < len(symbols):
                 logger.debug(f"Off-market hours: {len(symbols) - len(active_symbols)} US stocks skipped")
+            if rebuild_flag["need"]:
+                # WS 重连后: REST 全量重建缓存 (清空再填充, 消除断线缺口/污染)
+                sem = asyncio.Semaphore(8)
+                async def _rebuild(s, t):
+                    async with sem:
+                        try:
+                            bars = await asyncio.get_event_loop().run_in_executor(
+                                None, okx.fetch_ohlcv, s, t, 500)
+                            cache.reset(s, t)
+                            for bar in bars:
+                                cache.update(s, t, Candle(
+                                    timestamp=bar["timestamp"], open=bar["open"],
+                                    high=bar["high"], low=bar["low"],
+                                    close=bar["close"], volume=bar["volume"]))
+                        except Exception:
+                            pass
+                await asyncio.gather(*[_rebuild(s, t)
+                                      for s in active_symbols for t in timeframes])
+                rebuild_flag["need"] = False
+                logger.info(f"Cache rebuilt after WS reconnect ({len(active_symbols)} symbols)")
             await _refresh_cache_if_stale()
 
             # ── 三柱扫描 → 预警 (无方向预测) ──
@@ -1493,7 +1540,15 @@ async def async_main():
                     count += 1
                 push_text = "\n".join(lines_out)
                 feishu.send(push_text)
-                logger.info(f"Scan #{scan_count}: {len(warnings)} symbols with warnings, {count} pushed\n{push_text}")
+                diag_lines = []
+                for sym, item in warnings.items():
+                    d = item.get("diag") or {}
+                    if d:
+                        sym_short = sym.replace("-USDT-SWAP", "/USDT").split(":")[0]
+                        diag_lines.append(f"[diag] {sym_short}: "
+                                          + " | ".join(f"{tf}:{v}" for tf, v in d.items()))
+                logger.info(f"Scan #{scan_count}: {len(warnings)} symbols with warnings, {count} pushed\n"
+                            + push_text + ("\n" + "\n".join(diag_lines) if diag_lines else ""))
             else:
                 logger.info(f"Scan #{scan_count}: no warnings")
 

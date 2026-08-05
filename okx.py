@@ -32,17 +32,43 @@ class KlineCache:
         self._lock = threading.RLock()
 
     def update(self, symbol: str, timeframe: str, candle: Candle):
+        """更新缓存 — 保持时间戳升序 (2026-08-05 加固)
+
+        修复: 乱序/重复时间戳的 bar 被 append 导致序列错乱 (布林带/
+        段龄被污染)。规则:
+          - 时间戳 == 末尾 → 替换
+          - 时间戳 > 末尾 → 追加
+          - 时间戳 < 末尾 → 二分定位: 已存在则原位替换, 否则有序插入
+        """
+        import bisect
         with self._lock:
             tf_map = self._data.setdefault(symbol, {})
             candles = tf_map.setdefault(timeframe, [])
-            if candles and candles[-1].timestamp == candle.timestamp:
+            ts = candle.timestamp
+            if candles and candles[-1].timestamp == ts:
                 candles[-1] = candle
-            else:
+            elif not candles or ts > candles[-1].timestamp:
                 candles.append(candle)
                 if len(candles) > self._max:
                     candles.pop(0)
+            else:
+                keys = [c.timestamp for c in candles]
+                i = bisect.bisect_left(keys, ts)
+                if i < len(candles) and candles[i].timestamp == ts:
+                    candles[i] = candle  # 中间重复 → 原位替换
+                else:
+                    candles.insert(i, candle)  # 有序插入
+                    if len(candles) > self._max:
+                        candles.pop(0)
             sym_ts = self._last_update.setdefault(symbol, {})
             sym_ts[timeframe] = time.time()
+
+    def reset(self, symbol: str, timeframe: str):
+        """清空某 symbol/tf 缓存 (WS 重连后全量重建用)"""
+        with self._lock:
+            tf_map = self._data.get(symbol)
+            if tf_map is not None:
+                tf_map.pop(timeframe, None)
 
     def get_data_age_minutes(self, symbol: str, timeframe: str) -> float | None:
         """返回该 symbol/tf 缓存数据上次更新的时间 (分钟前), None=从未更新"""
@@ -80,6 +106,7 @@ class OKXClient:
             self._exchange.set_sandbox_mode(True)
         self._ws = None
         self._running = False
+        self._on_reconnect = None  # WS 重连回调 (main.py 用于缓存重建)
 
     # --- REST ---
     def get_top_symbols(self, n: int, quote: str = "USDT") -> list[str]:
@@ -228,6 +255,10 @@ class OKXClient:
 
         return sorted(all_bars, key=lambda x: x["timestamp"])
 
+    def set_on_reconnect(self, cb: Callable | None):
+        """设置 WS 重连回调 (重连后由 main.py 触发缓存重建)"""
+        self._on_reconnect = cb
+
     # --- WebSocket ---
     async def ws_connect(self, symbols: list[str], timeframes: list[str],
                          on_kline: Callable, on_trade: Callable | None = None):
@@ -283,6 +314,11 @@ class OKXClient:
                 if self._running:
                     logger.warning(f"WS disconnected: {e}, reconnecting in 30s...")
                 await asyncio.sleep(30)
+                if self._running and self._on_reconnect:
+                    try:
+                        self._on_reconnect()
+                    except Exception:
+                        pass
             finally:
                 if self._ws:
                     try:
