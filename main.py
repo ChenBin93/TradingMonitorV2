@@ -1605,6 +1605,7 @@ async def async_main():
                         ranked.append((w["level"], sym_short, w, dow, pos_ref))
                 ranked.sort(key=lambda x: (x[0], x[1]))
                 count = 0
+                seen = set()
                 for _, sym_short, w, dow, pos_ref in ranked:
                     if count >= 12:
                         break
@@ -1616,16 +1617,13 @@ async def async_main():
                     icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(w["level"], "")
                     lines_out.append(f"{sym_short} {icon}{w['tf']} {w['desc']}{seg}{pos_ref}")
                     count += 1
-                # 状态行 (每个有预警的标的一次, 按推送顺序)
-                seen = set()
-                for _, sym_short, w, dow, pos_ref in ranked[:count]:
-                    if sym_short in seen:
-                        continue
-                    seen.add(sym_short)
-                    item = next((it for it in warnings.values()
-                                 if it.get("_short") == sym_short), None)
-                    if item is not None:
-                        lines_out.append(f"  {_stat_line(item)}")
+                    # 状态行: 紧跟该标的的第一条预警 (带标的名, 便于对应)
+                    if sym_short not in seen:
+                        seen.add(sym_short)
+                        item = next((it for it in warnings.values()
+                                     if it.get("_short") == sym_short), None)
+                        if item is not None:
+                            lines_out.append(f"  {sym_short} 状态: {_stat_line(item)}")
                 push_text = "\n".join(lines_out)
                 feishu.send(push_text)
                 diag_lines = []
