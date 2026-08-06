@@ -1436,7 +1436,7 @@ async def async_main():
                     logger.warning(f"Prefill {s} {t}: {e}")
         await asyncio.gather(*[_fetch(s, t) for s in syms for t in tfs])
 
-    await _parallel_prefill(okx, symbols, timeframes, cache)
+    await _parallel_prefill(okx, symbols, timeframes, cache, limit=500)
     logger.info("Cache prefill done")
 
     def on_kline(sym: str, tf: str, candle: Candle):
