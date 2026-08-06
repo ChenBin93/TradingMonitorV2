@@ -696,6 +696,8 @@ def do_scan(
                     cons = "顺风" if dd == d4 else "逆风"
                 elif dd in ("up", "down") or d4 in ("up", "down"):
                     cons = "单边"
+                diag["日线"] = (f"daily_len={len(daily_df) if daily_df is not None else 0} "
+                               f"dow={dow_daily.get('seg_dir', '?') if dow_daily else 'EMPTY'}")
                 warnings[sym] = {"warns": warns, "dow": dow4h,
                                  "dow_daily": dow_daily, "dow_h1": dow_h1,
                                  "stats": stats, "dists": dists, "cons": cons,
