@@ -32,8 +32,14 @@ def _survival(k: int) -> float:
 
 
 def resample_daily(df: pd.DataFrame) -> pd.DataFrame:
-    """4H → 日线 (每 6 根 4H = 1 日线 bar; 日线收盘于当日最后一根 4H 之后)"""
-    idx = df.index
+    """4H → 日线 (每 6 根 4H = 1 日线 bar; 日线收盘于当日最后一根 4H 之后)
+
+    兼容两种 df 形态: timestamp 列 (live KlineCache) / DatetimeIndex (研究数据)
+    """
+    if "timestamp" in df.columns:
+        idx = pd.DatetimeIndex(df["timestamp"])
+    else:
+        idx = df.index
     day = np.array([ts.date() for ts in idx])
     out = []
     for dd in sorted(set(day)):
@@ -41,12 +47,13 @@ def resample_daily(df: pd.DataFrame) -> pd.DataFrame:
         j0 = np.flatnonzero(m)[0]
         out.append((pd.Timestamp(dd), df["open"].values[j0],
                     df["high"].values[m].max(), df["low"].values[m].min(),
-                    df["close"].values[m][-1]))
+                    df["close"].values[m][-1], float(df["volume"].values[m].sum())))
     di = pd.DatetimeIndex([x[0] for x in out])
     return pd.DataFrame({"open": [x[1] for x in out],
                          "high": [x[2] for x in out],
                          "low": [x[3] for x in out],
-                         "close": [x[4] for x in out]}, index=di)
+                         "close": [x[4] for x in out],
+                         "volume": [x[5] for x in out]}, index=di)
 
 
 def compute_dow_info(df_4h: pd.DataFrame | None) -> dict:
@@ -123,7 +130,7 @@ def stat_state(df: pd.DataFrame | None) -> dict | None:
           "dev": 偏离MA20(ATR), "adx": 趋势强度}
     与 A2 研究口径一致 (research.state_features.state_series)
     """
-    if df is None or len(df) < 60:
+    if df is None or len(df) < 30:
         return None
     try:
         from research.state_features import state_series
