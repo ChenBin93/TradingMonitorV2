@@ -114,3 +114,35 @@ def check_recent_touch(levels, df: pd.DataFrame | None):
             return lv
     return None
 
+
+
+def stat_state(df: pd.DataFrame | None) -> dict | None:
+    """A2 统计状态 + 核心特征值 (dev, adx) — 局部气候判断
+
+    返回 {"label": "涨趋势·late" / "transition" / "range",
+          "dev": 偏离MA20(ATR), "adx": 趋势强度}
+    与 A2 研究口径一致 (research.state_features.state_series)
+    """
+    if df is None or len(df) < 60:
+        return None
+    try:
+        from research.state_features import state_series
+        states, feats = state_series(df)
+        s = str(states[-1])
+        dev = float(feats["dev"].iloc[-1])
+        adx = float(feats["adx"].iloc[-1])
+        if s.startswith("trend_up"):
+            stage = s.split(":")[1] if ":" in s else "accelerate"
+            label = f"涨趋势·{stage}"
+        elif s.startswith("trend_down"):
+            stage = s.split(":")[1] if ":" in s else "accelerate"
+            label = f"跌趋势·{stage}"
+        elif s == "transition":
+            label = "transition"
+        elif s == "range":
+            label = "range"
+        else:
+            label = s
+        return {"label": label, "dev": dev, "adx": adx}
+    except Exception:
+        return None

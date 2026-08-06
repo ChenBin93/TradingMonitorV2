@@ -662,7 +662,44 @@ def do_scan(
             dow4h = ms_mod.compute_dow_info(df_4h)
             warns = compose_warns(sym, tfs)
             if warns:
-                warnings[sym] = {"warns": warns, "dow": dow4h, "diag": diag}
+                # 推荐标的多周期状态 (仅对预警标的计算 — 性能)
+                dow_h1 = ms_mod.compute_dow_info(df_1h)
+                daily_df = None
+                if df_4h is not None and len(df_4h) >= 60:
+                    try:
+                        daily_df = ms_mod.resample_daily(df_4h)
+                    except Exception:
+                        daily_df = None
+                dow_daily = (ms_mod.compute_dow_info(daily_df)
+                             if daily_df is not None and len(daily_df) >= 30 else {})
+                stats = {}
+                for tf, dfx in (("日线", daily_df), ("4h", df_4h), ("1h", df_1h)):
+                    st = ms_mod.stat_state(dfx)
+                    if st:
+                        stats[tf] = st
+                # 每周期最近位带距离 (ATR 归一, 取最近一侧)
+                dists = {}
+                for tf, info in tfs.items():
+                    rel = info.get("rel") or {}
+                    dmin = None
+                    for side in ("support", "resistance"):
+                        lv = rel.get(side)
+                        if lv and (dmin is None or lv["dist_atr"] < dmin):
+                            dmin = lv["dist_atr"]
+                    if dmin is not None:
+                        dists[tf] = round(float(dmin), 2)
+                # 一致性 (A6d): 日线段方向 vs 4H 段方向
+                cons = ""
+                dd = dow_daily.get("seg_dir")
+                d4 = dow4h.get("seg_dir")
+                if dd in ("up", "down") and d4 in ("up", "down"):
+                    cons = "顺风" if dd == d4 else "逆风"
+                elif dd in ("up", "down") or d4 in ("up", "down"):
+                    cons = "单边"
+                warnings[sym] = {"warns": warns, "dow": dow4h,
+                                 "dow_daily": dow_daily, "dow_h1": dow_h1,
+                                 "stats": stats, "dists": dists, "cons": cons,
+                                 "diag": diag}
         except Exception as e:
             logger.debug(f"scan warn error {sym}: {e}")
     return warnings
@@ -1502,9 +1539,48 @@ async def async_main():
 
             if warnings:
                 lines_out = [f"━━━ ⚡预警 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()} ━━━"]
+
+                def _seg_str(sd):
+                    # 段位置早/中/晚不可标注: 进行中段被 close_seg(n-1) 截断,
+                    # seg_pos 几乎恒为"晚" (误导) — 用段龄+存活率表达
+                    d = sd.get("seg_dir")
+                    age = sd.get("seg_age")
+                    surv = sd.get("seg_surv")
+                    if d in ("up", "down") and age is not None:
+                        arrow = "↑" if d == "up" else "↓"
+                        return f"{arrow}{age}根({surv:.0%})"
+                    return "—"
+
+                def _stat_line(item):
+                    """推荐标的多周期状态行: 日线/4H/1H 段 + A2 统计 + 位距 + 一致性"""
+                    stats = item.get("stats") or {}
+                    parts = []
+                    for tf, tfname, sd in (("日线", "日线", item.get("dow_daily") or {}),
+                                           ("4h", "4H", item.get("dow") or {}),
+                                           ("1h", "1H", item.get("dow_h1") or {})):
+                        seg_s = _seg_str(sd)
+                        st = stats.get(tf)
+                        if st:
+                            seg_s += f"·{st['label']}(dev{st['dev']:+.1f},adx{st['adx']:.0f})"
+                        parts.append(f"{tfname}:{seg_s}")
+                    dists = item.get("dists") or {}
+                    dparts = []
+                    for tf, tfname in (("日线", "D"), ("4h", "4H"), ("1h", "1H")):
+                        v = dists.get(tf)
+                        if v is not None:
+                            dparts.append(f"{tfname}{v}")
+                    line = " | ".join(parts)
+                    if dparts:
+                        line += f" | 距" + "/".join(dparts) + "ATR"
+                    cons = item.get("cons")
+                    if cons:
+                        line += f" | {cons}"
+                    return line
+
                 ranked = []
                 for sym, item in warnings.items():
                     sym_short = sym.replace("-USDT-SWAP", "/USDT").split(":")[0]
+                    item["_short"] = sym_short
                     dow = item.get("dow") or {}
                     # 仓位参考 (用户: 10X 杠杆 / 1H ATR 止损 / 本金 1% 风险 → 本金开仓比例)
                     # pos_pct = 价格 × risk_pct / (1×ATR_1h × leverage) — 旧系统公式
@@ -1538,6 +1614,16 @@ async def async_main():
                     icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(w["level"], "")
                     lines_out.append(f"{sym_short} {icon}{w['tf']} {w['desc']}{seg}{pos_ref}")
                     count += 1
+                # 状态行 (每个有预警的标的一次, 按推送顺序)
+                seen = set()
+                for _, sym_short, w, dow, pos_ref in ranked[:count]:
+                    if sym_short in seen:
+                        continue
+                    seen.add(sym_short)
+                    item = next((it for it in warnings.values()
+                                 if it.get("_short") == sym_short), None)
+                    if item is not None:
+                        lines_out.append(f"  {_stat_line(item)}")
                 push_text = "\n".join(lines_out)
                 feishu.send(push_text)
                 diag_lines = []
