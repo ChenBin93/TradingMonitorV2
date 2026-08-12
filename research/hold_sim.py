@@ -63,6 +63,18 @@ def simulate_holds(close, high, low, atr, states, entries,
     n = len(close)
     states = np.asarray(states)
     entries = np.asarray(entries, bool)
+    if len(entries) != n:
+        raise ValueError(
+            "entries 与 close 长度不一致: 研究脚本禁止自行切片对齐，"
+            "请用 research.ctx.make_ctx 声明 warmup")
+    if len(high) != n or len(low) != n or len(atr) != n:
+        raise ValueError(
+            "high/low/atr 与 close 长度不一致: 研究脚本禁止自行切片对齐，"
+            "请用 research.ctx.make_ctx 声明 warmup")
+    if len(states) != n:
+        raise ValueError(
+            "states 与 close 长度不一致: 研究脚本禁止自行切片对齐，"
+            "请用 research.ctx.make_ctx 声明 warmup")
 
     # 已确认 pivot lows/highs (pos, val)
     ph, pl = confirmed_pivots(_df_like(high, low))

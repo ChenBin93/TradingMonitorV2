@@ -48,6 +48,25 @@ def load_candles(db_path: str = DB_PATH,
     return out
 
 
+def check_continuity(df: pd.DataFrame, tf: str) -> list[tuple]:
+    """按 tf (5m/1h/4h/...) 检查 bar 间隔缺口 — 返回缺口记录列表
+
+    每条记录: (bar 位置, 该根时间戳, 前一根时间戳, 实际间隔)。
+    时间戳 = bar 开盘时间 (OKX), 连续市场间隔必须恰为 tf。
+    """
+    idx = df.index
+    n = len(idx)
+    if n < 2:
+        return []
+    freq = pd.Timedelta(hours=TF_HOURS[tf])
+    ts = idx.values.astype("datetime64[ns]")
+    diffs = np.diff(ts)                      # 相邻间隔, ns 单位
+    freq_ns = int(freq.value)
+    gap_pos = np.flatnonzero(diffs != freq_ns) + 1
+    return [(int(p), idx[p], idx[p - 1], pd.to_timedelta(int(diffs[p - 1])))
+            for p in gap_pos]
+
+
 def verify(df: pd.DataFrame, symbol: str = "", tf: str = "") -> list[str]:
     """数据完整性检查 — 返回问题列表 (空 = 干净)"""
     problems = []
@@ -65,6 +84,10 @@ def verify(df: pd.DataFrame, symbol: str = "", tf: str = "") -> list[str]:
         problems.append(f"{n_na} 个 NaN")
     if len(df) < 2:
         problems.append("数据不足 2 根")
+    if tf:
+        gaps = check_continuity(df, tf)
+        if gaps:
+            problems.append(f"bar 间隔缺口 {len(gaps)} 处 (首个 @ 位置 {gaps[0][0]})")
     for p in problems:
         print(f"[verify] {symbol} {tf}: {p}", flush=True)
     return problems

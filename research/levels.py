@@ -10,7 +10,8 @@
   触碰 = intrabar (bar low/high 穿过 [price-band, price+band])
   破位 = 收盘确认 (close 越过带外侧, 与结构状态机语义一致)
 """
-from dataclasses import dataclass, field
+import bisect
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import pandas as pd
@@ -18,16 +19,24 @@ import pandas as pd
 from research.structures import K, confirmed_pivots
 
 
-@dataclass
+@dataclass(frozen=True)
 class Level:
+    """关键位 (R1: 形成后字段不可变)
+
+    触碰事件不写入字段, 而是追加到内部事件日志 `_touches`
+    (list[(confirm_at, pos)], 按 confirm 升序)。last_touch_idx/age_bars 只是
+    "形成时刻"的静态初值; active_levels(levels, t) 用 bisect 从日志重建 t 时刻
+    快照, 因此追加数据不改变任何历史 t 的快照 (无未来函数)。
+    """
     price: float
     side: str             # support / resistance
     touch_count: int      # 聚类内 pivot 数 (pivot 定义: 触碰次数, 含自身)
-    last_touch_idx: int   # 最近一次触碰 (pivot 位置)
-    age_bars: int         # 位出现(聚类完成)距当前 bar 的根数
+    last_touch_idx: int   # 形成时刻的最近触碰 (pivot 位置; 快照按日志重建)
+    age_bars: int         # 形成时刻位出现(聚类完成)距当前 bar 的根数
     band: float           # 位带半宽 (pivot 定义: 0)
     kind: str             # pivot / cluster
     confirm_at: int = 0   # 位可用时刻 (聚类完成时刻)
+    _touches: list = field(default_factory=list, repr=False, compare=False)
 
 
 def _df_like(high, low):
@@ -76,7 +85,7 @@ def cluster_levels(high, low, atr, k=K, tolerance_mult=0.3, min_touch=2):
     events.sort()
 
     formed = []   # 已冻结位带 (cluster), 按 (side, price) 排序维护
-    pending = []  # 未形成组 [side, prices, last_pos]
+    pending = []  # 未形成组 [side, prices, events]; events: [(confirm, pos)] 升序
 
     def find_near(price, side, tol):
         """二分查找同侧 price ± tol 内的已形成位带"""
@@ -114,43 +123,58 @@ def cluster_levels(high, low, atr, k=K, tolerance_mult=0.3, min_touch=2):
     for confirm, pos, price, side in events:
         tol = atr[min(confirm, len(atr) - 1)] * tolerance_mult if len(atr) else 1e-9
         tol = max(tol, 1e-9)
-        # 1) 并入已形成位带 (价格/触次冻结, 只记最近触碰 — 触次含未来信息, 不累加)
+        # 1) 并入已形成位带 (价格/触次冻结; 触碰只进事件日志, 不突变字段 — R1)
         lv = find_near(price, side, tol)
         if lv is not None:
-            lv.last_touch_idx = max(lv.last_touch_idx, pos)
+            lv._touches.append((confirm, pos))
             continue
         # 2) 尝试并入未形成组
         merged = False
         for grp in pending:
             if grp[0] == side and abs(float(np.median(grp[1])) - price) <= tol:
                 grp[1].append(price)
-                grp[2] = max(grp[2], pos)
+                grp[2].append((confirm, pos))
                 if len(grp[1]) >= min_touch:
                     insert_formed(Level(
                         price=float(np.median(grp[1])),
                         side=side,
                         touch_count=len(grp[1]),
-                        last_touch_idx=grp[2],
+                        last_touch_idx=grp[2][-1][1],
                         age_bars=-1,
                         band=tol / 2.0,
                         kind="cluster",
                         confirm_at=confirm,
+                        _touches=grp[2],
                     ))
                     pending.remove(grp)
                 merged = True
                 break
         if not merged:
-            pending.append([side, [price], pos])
+            pending.append([side, [price], [(confirm, pos)]])
     return formed
 
 
+def _last_touch(lv, t):
+    """confirm<=t 的最近触碰 pos — 事件日志 bisect (R1)"""
+    if not lv._touches:
+        return lv.last_touch_idx
+    i = bisect.bisect_right([c for c, _ in lv._touches], t) - 1
+    if i >= 0:
+        return lv._touches[i][1]
+    return -1
+
+
 def active_levels(levels, t):
-    """bar t 时可用的位 (confirm_at <= t), age 已更新"""
+    """bar t 时可用的位 (confirm_at <= t), age 由事件日志按确认时序重建快照
+
+    R1: last_touch_idx/age_bars 只反映 confirm<=t 的触碰事件 (bisect 从 _touches
+    重建), 返回副本而非原地突变 — 追加数据不改变历史 t 的快照。
+    """
     out = []
     for lv in levels:
         if lv.confirm_at <= t:
-            lv.age_bars = t - lv.last_touch_idx
-            out.append(lv)
+            last_pos = _last_touch(lv, t)
+            out.append(replace(lv, last_touch_idx=last_pos, age_bars=t - last_pos))
     return out
 
 
@@ -191,21 +215,24 @@ def level_breakdown(lv, close, atr, depth=0.5, w=24, hold_ratio=0.5):
     穿透 attempt: close 越出位带外侧 ≥ depth×ATR (穿透时刻的 ATR)
     确认 confirmed: 穿透后未来 w 根内 close 保持在外侧的比例 ≥ hold_ratio
     外侧 outside: close 越过位带外沿 (price ± band)
+    R2: attempt/confirmed 只对 t >= confirm_at (位带形成后) 判定 —
+        形成之前的"突破"不计入; outside 保持纯描述语义不门控
 
     返回 (attempt, confirmed, outside, ratio) 布尔/浮点数组 (长度 n)
     """
     n = len(close)
+    idx = np.arange(n)
+    usable = idx >= lv.confirm_at  # R2 门控
     p_lo = lv.price - lv.band
     p_hi = lv.price + lv.band
     if lv.side == "support":
         outside = close < p_lo
-        attempt = close < p_lo - depth * atr
+        attempt = (close < p_lo - depth * atr) & usable
     else:
         outside = close > p_hi
-        attempt = close > p_hi + depth * atr
+        attempt = (close > p_hi + depth * atr) & usable
     # 未来 [t+1, t+w] 的外侧比例 (后缀和差分; 越界处按 0 处理)
     suffix = np.concatenate([outside[::-1].cumsum()[::-1], np.zeros(1)])
-    idx = np.arange(n)
     s_next = np.zeros(n)
     s_next[:n - 1] = suffix[1:n]
     s_end = np.zeros(n)

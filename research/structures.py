@@ -199,10 +199,11 @@ def dow_segments(df, k=K):
         nonlocal seg, peak_pos, peak_val, trough_pos, trough_val
         nonlocal last_hl, last_lh, n_hh, n_hl
         if seg is not None:
+            # a6b 修复: 段内无 pivot (peak/trough 未确认) 返回 NaN 而非 0.0
             if seg["direction"] == "up":
-                amp = (peak_val - trough_val) if (peak_val and trough_val) else 0.0
+                amp = (peak_val - trough_val) if (peak_val is not None and trough_val is not None) else float("nan")
             else:
-                amp = (trough_val - peak_val) if (peak_val and trough_val) else 0.0
+                amp = (trough_val - peak_val) if (peak_val is not None and trough_val is not None) else float("nan")
             seg.update(end=end, bars=end - seg["start"] + 1,
                        amp_atr=amp / max(1e-9, atr[seg["start"]]),
                        n_hh=n_hh, n_hl=n_hl)

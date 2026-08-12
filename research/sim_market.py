@@ -38,10 +38,32 @@ def gbm_ohlc(n, sig, seed=0, sub=8, start=100.0):
     return o, h, l, c
 
 
-def gbm_dataframe(n, sig, seed=0, sub=8, start=100.0):
-    """GBM OHLC → DataFrame (索引与真实数据同构, 供研究管线直接使用)"""
+def gbm_dataframe(n, sig, seed=0, sub=8, start=100.0, freq="1h", start_time="2023-01-01"):
+    """GBM OHLC → DataFrame (索引与真实数据同构, 供研究管线直接使用)
+
+    freq/start_time: 索引周期与起点 (默认 "1h"/"2023-01-01" 保持旧行为);
+    需要锚定真实数据索引时请用 gbm_matching (锚定 ref_df.index, σ 自动估计)。
+    """
     import pandas as pd
     o, h, l, c = gbm_ohlc(n, sig, seed, sub, start)
-    idx = pd.date_range("2023-01-01", periods=n, freq="1h", tz="UTC")
+    idx = pd.date_range(pd.Timestamp(start_time, tz="UTC"), periods=n, freq=freq)
     return pd.DataFrame({"open": o, "high": h, "low": l, "close": c,
                          "volume": np.ones(n)}, index=idx)
+
+
+def gbm_matching(ref_df, seed=0, sub=8):
+    """GBM OHLC DataFrame 与真实数据匹配 (时间锚定, 无信息对照)
+
+    - 索引 = ref_df.index (锚定 ref 首根, 长度与 ref 相同 — 修复 GBM 年份错位)
+    - σ 由 ref 对数收益样本 std (ddof=1) 估计 (替代各研究手写的 σ 估计模式)
+    - 起始价格锚定 ref 首根 close
+    """
+    import pandas as pd
+    c = ref_df["close"].values
+    n = len(c)
+    if n < 2:
+        raise ValueError("gbm_matching: ref_df 至少需要 2 根")
+    sig = float(np.std(np.diff(np.log(c)), ddof=1))
+    o, h, l, c2 = gbm_ohlc(n, sig, seed, sub, start=float(c[0]))
+    return pd.DataFrame({"open": o, "high": h, "low": l, "close": c2,
+                         "volume": np.ones(n)}, index=ref_df.index)
