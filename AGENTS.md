@@ -17,23 +17,30 @@ TradingMonitor V2 — OKX 永续合约实时监控 + 量化研究系统。Python
 - 美股代币仅美盘 UTC 13:30-21:00 推送，金属/币 24h；显示时间均为北京时间
 
 ## 回测与研究（重点）
-- 自研回测引擎（backtest_*.py）已整体删除（2026-08-03），后续回测验证改用第三方框架（待定）
-- `data/backtest.db`（gitignored，保留）：20 标的 × 5m/1h/4h × 3 年（2023-08→2026-08，约 690 万行）原始 K 线，可作为第三方框架的数据源；与 live 的 data/history.db 完全独立。如需补充/重下数据可参考 history.py 的 OKX history-candles 分页逻辑（after 参数翻向过去）
-- **未来函数是本仓库第一大禁忌**：K线时间戳 = bar 开盘时间；研究只能用已收盘 bar。此前整批研究（level/episode 体系等）因未来函数污染作废，两天工作白费（git log: "reset: delete all research (contaminated by future-function)"）。**研究已重头开始（2026-08-03）**，旧研究结论一律不可直接采信，必须用无未来函数方法重验
-- **研究基础设施（research/，pytest 门禁）**：
-  - `research/caliber.py` — 严格口径唯一来源：入场=信号 bar 收盘、对称 1:1 T×ATR、前向先碰判定、同 bar 双命中跳过、超时 expired、MIN_N=200。**研究脚本禁止硬编码口径**
-  - `research/data_loader.py` — backtest.db 加载 + 完整性检查 + MTF 对齐（`align_higher`：高位 bar 必须已收盘才能用，低位 t 只能用 open+时长 ≤ t 的高位 bar）
-  - `research/outcome.py` — 双实现结果引擎：numpy 参考引擎（权威）+ vectorbt（column-per-entry 模拟，去重主单）。**bar 内判定用 open 出发语义**（跳空按越界判定，2026-08-03 修正——旧 close 基准判定有方向偏差）。**vectorbt 语义坑**：sl_stop/tp_stop 是百分比非价格、成交时机可差 1 根、止损单偶发部分成交伪影——全部已被测试锁定，别改这些约定
-  - `research/sim_market.py` — 随机游走对照市场（真实 OHLC 子步构造）。**严禁再用 close×±2σ 简化构造**（有乘法偏差）；**策略期望必须计入 timeout 交易**（排除会虚高）
-  - `research/tests/` — 黄金测试（手算答案）+ 未来函数不变性测试 + MTF 边界 + 真实数据对拍 + **性质测试（physics checks：无信息市场 1:1 基线必须 ≈50%、多空镜像恒等式、合成市场恢复真值）**。**每次研究前必跑 `python3 -m pytest research/tests -q`（约 4 分钟），失败即停**
-  - 教训（2026-08-03 两次低级问题后确立）：①性质测试是"设计正确性"的唯一独立判据，手算答案只能验证实现与设计一致；②聚类/位带等结构检测必须在线聚类+冻结（全样本聚类=未来函数）；③任何"正期望发现"的发布门槛 = 真实 − 正确构造的随机游走基线 > 0 且分年稳定
-- 新研究流程：`research/studies/` 写脚本（docstring 写明无未来函数设计 + 预注册假设）→ 输出 `research/notes/` → 结论落地后提交（提交前缀风格: `research:` / `live:` / `fix:` / `docs:`）
+- **研究权威文档 = `research/PLAN.md`**（C 系列协议，2026-08-12 定稿）。A/B 系列（2026-08-03~05）29 项研究因未来函数/口径违规于 2026-08-12 整体作废，已移入 `research/archive/`——**旧研究结论一律不得引用**（作废原因见 research/archive/README.md）
+- `data/backtest.db`（gitignored，保留）：20 标的 × 5m/1h/4h × 3 年（2023-08→2026-08，约 690 万行）原始 K 线；与 live 的 data/history.db 完全独立。如需补充/重下数据可参考 history.py 的 OKX history-candles 分页逻辑（after 参数翻向过去）
+- **未来函数是本仓库第一大禁忌**：K线时间戳 = bar 开盘时间；研究只能用已收盘 bar；MTF 对齐走 `align_higher`；结构检测必须在线聚类+冻结（全样本聚类=未来函数）。**每次研究前必跑两道门禁，任一失败即停**：
+  1. 引擎门禁：`python3 -m pytest research/tests -q`（约 4 分钟；黄金测试 + 未来函数不变性测试 + MTF 边界 + 真实数据对拍 + 性质测试）
+  2. 研究脚本门禁：`python3 research/check_study.py <script>`（import 白名单/禁止模式 AST 检查/.out 头部 sha256 校验/GATE 区块校验/数字指纹/成对性/发布门槛强制，任一违规 FAIL 并报文件+行号）
+- **分层编号**：c1x 描述层（市场事实，纯描述，无入场）/ c2x 条件层（条件 1:1 胜率/倾向）/ c3x 策略层（策略期望 + 成本核算 + vectorbt 二层 + live 试点）。脚本写 `research/studies/`，输出 `research/notes/`
+- **研究脚本模板**：docstring 预注册（标题 + 预注册假设 H1.. 运行前锁定、结论逐条回应 + 无未来函数设计逐特征信息边界表 + 数据/参数声明 + 发布门槛自检 + 运行命令），check_study 校验；`PARAMS` 唯一参数源；GATE 自检内置（GBM ≥30 种子、与同管线重放的无条件基线 ≈50%±1pp，失败 SystemExit）
+- **发布门槛**（任何"正期望/edge/有效"结论必须全绿）：真实 − 正确构造的随机游走基线（GBM，固定种子序列 ≥30，禁换种子刷结果）> 0 且分年稳定且 n ≥ MIN_N；条件层加 GATE≈50% + 分年 + 净效应 + 成本行；策略层加成本核算。结论每个数字带 `(.out:L行号)` 引用，禁止新引入 .out 没有的分层
+- **因果模块**（研究基础设施唯一出口，禁止自写替代）：
+  - `research/causal.py` — rolling_percentile / rolling_rank（禁全样本分位）/ causal_confirmed（事后标签因果可用版，conf∈[t-60,t-24]，[t-23,t] 内突破剔除）/ frozen_cluster（在线聚类+冻结）
+  - `research/ctx.py` — make_ctx 是截断对齐的唯一构造路径（内部统一 `iloc[warmup:]`）；entries_from_events 保证全长度布尔
+  - 引擎（caliber.py / outcome.py / sim_market.py / data_loader.py）+ research/tests/ 经 2026-08-12 审计无未来函数，保留；研究脚本禁止硬编码口径
+- **禁止项**（check_study AST 拦截）：自写 outcome 引擎（同现 tp/sl 变量 + 逐 bar 循环）；价格数组手动切片（必须走 ctx.make_ctx）；`np.percentile/quantile` 作用于特征（必须 rolling_percentile）；`searchsorted(conf,...)` 事后标签条件化（必须 causal_confirmed）；研究脚本互 import
+- **研究纪律**：改脚本 = 重跑 + 结论重写（sha256 校验）；每研究一个 commit（脚本+notes+.out）；禁止从脏工作树运行；负结果同等归档；提交前缀风格: `research:` / `live:` / `fix:` / `docs:`
 
 ## 文档
-- docs/LIVE_SYSTEM.md — 当前 live 系统规格（2026-08-03 更新；注意部分验证结论基于已作废研究，落地标记待重验）
-- docs/SESSION_SUMMARY.md — 研究结论速查（同样待重验；其"测试工具"一节引用的 backtest_*.py 已删除）
-- 多处引用 docs/STRATEGY_VALIDATION.md（45章）但该文件不存在——以代码和重验结果为准
+- research/PLAN.md — **研究权威文档**（C 系列协议：三层门禁/编号分层/脚本模板/发布门槛/路线图）
+- docs/LIVE_SYSTEM.md — 当前 live 系统规格；**运行规格类内容（端口/启动/推送时间窗/live 数据流）仍有效**；涉及研究数字的段落（SCENE_WR 胜率表、关键位质量分、"类型A 贴位"等）已加作废戳与行内标注（2026-08-12），不采信
+- docs/SESSION_SUMMARY.md — 已加作废戳（2026-08-12 批次作废），研究结论速查不再可采信
+- docs/MARKET_STATE_STRATEGY_MAP.md — 已加作废戳，不采信
+- 多处引用 docs/STRATEGY_VALIDATION.md（45章）但该文件不存在——以代码和 research/PLAN.md 为准
 
 ## 注意
 - 无测试/无 lint，验证 = 运行脚本读输出
 - secrets.yaml 必须存在（gitignored）；勿提交 data/*.db、logs/*
+- **research/levels.py 是 live 依赖，不得归档**：main.py:581 → key_levels.py:19 → `research.levels.cluster_levels`（关键位监控核心）。A/B 批次未提交的 levels batch helpers 改动已存档于 `research/archive/patches/levels_batch_helpers_uncommitted.patch`（研究全作废不留用）；levels.py 修复（PLAN.md §2 R1/R2）须在 HEAD 基础上重写
+- A/B 批次作废原因（一句话）：A3 索引错位、confirmed 未来标签泄漏、B4 结论不可复现、B4e 全样本分位等致命缺陷，详见 research/archive/README.md 与 research/PLAN.md
