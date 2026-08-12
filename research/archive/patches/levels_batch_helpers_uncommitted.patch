@@ -1,0 +1,101 @@
+diff --git a/research/levels.py b/research/levels.py
+index 096ecf2..875a0a9 100644
+--- a/research/levels.py
++++ b/research/levels.py
+@@ -185,6 +185,96 @@ def close_breakout(levels, t, close):
+     return broken
+ 
+ 
++def levels_breakdown_all(levels, close, atr, depth=0.5, w=24, hold_ratio=0.5):
++    """批量穿透/确认 (所有位一次向量化, 内存可控 — 避免逐位调用的数组开销)
++
++    返回 (attempt, confirmed, outside, ratio) 各 (m, n) 数组
++    """
++    m = len(levels)
++    n = len(close)
++    if m == 0:
++        return (np.zeros((0, n), bool),) * 3 + (np.zeros((0, n)),)
++    p_lo = np.array([lv.price - lv.band for lv in levels])[:, None]  # (m,1)
++    p_hi = np.array([lv.price + lv.band for lv in levels])[:, None]
++    is_sup = np.array([1.0 if lv.side == "support" else 0.0 for lv in levels])[:, None]
++    c = close[None, :]   # (1,n)
++    a = atr[None, :]
++    outside = np.where(is_sup == 1, c < p_lo, c > p_hi)                     # (m,n)
++    attempt = np.where(is_sup == 1, c < p_lo - depth * a, c > p_hi + depth * a)
++    # 未来 [t+1, t+w] 外侧数量 (沿时间轴后缀和)
++    suffix = np.zeros((m, n + 1))
++    suffix[:, :n] = outside[:, ::-1].cumsum(axis=1)[:, ::-1]
++    idx = np.arange(n)
++    s_next = np.zeros((m, n))
++    s_next[:, :n - 1] = suffix[:, 1:n]
++    s_end = np.zeros((m, n))
++    end_idx = idx + (w + 1)
++    valid = end_idx <= n
++    s_end[:, valid] = suffix[:, end_idx[valid]]
++    ratio = (s_next - s_end) / w
++    confirmed = attempt & (ratio >= hold_ratio)
++    return attempt, confirmed, outside, ratio
++
++
++def levels_touch_class_all(levels, close, high, low, atr, depth=0.5, w=24, hold_ratio=0.5,
++                           chunk=100):
++    """批量触碰分类 (所有位, 分块控制内存) — 返回每位的分类索引列表
++
++    返回 dict: {key: [每位的 idx 数组]}  key ∈ touch/reject/breakout/attempt/
++               confirmed/false_break
++    """
++    out = {k: [] for k in ("touch", "reject", "breakout", "attempt",
++                           "confirmed", "false_break")}
++    for s in range(0, len(levels), chunk):
++        sub = levels[s:s + chunk]
++        res = _touch_class_chunk(sub, close, high, low, atr, depth, w, hold_ratio)
++        for k in out:
++            out[k].extend(res[k])
++    return out
++
++
++def _touch_class_chunk(levels, close, high, low, atr, depth, w, hold_ratio):
++    """单块 (≤chunk 位) 的触碰分类 — (m, n) 数组仅对本块分配"""
++    m = len(levels)
++    n = len(close)
++    out = {k: [] for k in ("touch", "reject", "breakout", "attempt",
++                           "confirmed", "false_break")}
++    if m == 0:
++        return out
++    p_lo = np.array([lv.price - lv.band for lv in levels])[:, None]
++    p_hi = np.array([lv.price + lv.band for lv in levels])[:, None]
++    t_arr = np.arange(n)[None, :]
++    confirm_at = np.array([lv.confirm_at for lv in levels])[:, None]
++    usable = t_arr >= confirm_at
++    tm = (low[None, :] <= p_hi) & (high[None, :] >= p_lo) & usable
++    touch = tm.copy()
++    touch[:, 1:] &= ~tm[:, :-1]
++    attempt, confirmed, outside, ratio = levels_breakdown_all(
++        levels, close, atr, depth, w, hold_ratio)
++    # 触碰后 w 根内是否有确认突破 (按位后缀)
++    suffix = np.zeros((m, n + 1))
++    suffix[:, :n] = confirmed[:, ::-1].cumsum(axis=1)[:, ::-1]
++    idx = np.arange(n)
++    s_next = np.zeros((m, n))
++    s_next[:, :n - 1] = suffix[:, 1:n]
++    s_end = np.zeros((m, n))
++    end_idx = idx + (w + 1)
++    valid = end_idx <= n
++    s_end[:, valid] = suffix[:, end_idx[valid]]
++    has_break = (s_next - s_end) > 0
++    t_break = touch & has_break
++    t_reject = touch & ~has_break
++    false_break = attempt & ~confirmed
++    for i in range(m):
++        out["touch"].append(np.flatnonzero(touch[i]))
++        out["reject"].append(np.flatnonzero(t_reject[i]))
++        out["breakout"].append(np.flatnonzero(t_break[i]))
++        out["attempt"].append(np.flatnonzero(attempt[i]))
++        out["confirmed"].append(np.flatnonzero(confirmed[i]))
++        out["false_break"].append(np.flatnonzero(false_break[i]))
++    return out
++
++
+ def level_breakdown(lv, close, atr, depth=0.5, w=24, hold_ratio=0.5):
+     """单位的穿透/确认向量 (向量化, 事后标签 — 合法使用未来数据)
+ 
