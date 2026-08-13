@@ -1,0 +1,31 @@
+# meta: study_id=c32_er_freq_control date=2026-08-13 script_sha256=62ce33c6143d53d00a5348a3bbb5e3623f8f31ac5cbd650ddbe9c04e82dca84d data_range=加密 2023-08..2026-08 / 对照以 control.db 为准 (≈2y) params=crypto=BTC/USDT:USDT+ETH/USDT:USDT,control=SPY+CL=F+GC=F+EURUSD=X+^TNX,er_n=10,gbm_seeds=30,h2_min=0.02,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(加密 1h ER_10 跨标的中位数): 真实 27.8% GBM 27.9% [PASS]; 探测器自检 合成iid 1h vs 日线 ER 中位数频率无关 [PASS]; 加密连续 GBM null 梯度 ±0.02 [PASS]; MIN_N 各序列 ER 样本数≥100 [PASS]
+# RESULTS: [学习级] U0-1 补验 (c30 加密证伪书断言, 本考证同管线传统市场); ER_10 = |C_t−C_{{t−10}}|/Σ|ΔC|; 传统 1h/1d 为 control.db 原生 (1h ER 窗口跨会话缺口=预注册设计偏离, gap 匹配 null); 加密日线 = daily_resample; 描述层无入场, 无交易含义
+
+[加密] ER_10 中位数 1h vs 日线 (c30 口径):
+  BTC/USDT:USDT: 1h 27.4% | 日线 28.8% | 差 +1.4pp ([MIN_N 通过])
+  ETH/USDT:USDT: 1h 28.1% | 日线 30.6% | 差 +2.4pp ([MIN_N 通过])
+  加密均值 日线−1h 差: +1.9pp
+
+[H1] 传统市场 ER_10 中位数 1h vs 1d (书语境):
+  SPY: 1h 34.1% | 1d 31.2% | 差 -2.9pp [1h<1d ✗] ([MIN_N 通过])
+  CL=F: 1h 31.2% | 1d 24.2% | 差 -7.0pp [1h<1d ✗] ([MIN_N 通过])
+  GC=F: 1h 30.9% | 1d 27.9% | 差 -3.0pp [1h<1d ✗] ([MIN_N 通过])
+  EURUSD=X: 1h 29.7% | 1d 29.4% | 差 -0.3pp [1h<1d ✗] ([MIN_N 通过])
+  ^TNX: 1h 36.1% | 1d 28.0% | 差 -8.1pp [1h<1d ✗] ([MIN_N 通过])
+  H1 判据: 5 标的全部 1h<1d -> FAIL (0/5)
+
+[H2] 加密特殊性: 传统均值 -4.3pp − 加密均值 +1.9pp = -6.2pp (判据 ≥2.0pp) -> FAIL
+
+[H3] GBM null 梯度 (日线−1h ER 中位数, 30 种子, gap 匹配):
+  BTC/USDT:USDT: null 梯度 +0.3pp (σ 2.4pp) [连续]
+  ETH/USDT:USDT: null 梯度 +0.3pp (σ 2.4pp) [连续]
+  SPY: null 梯度 +0.2pp (σ 2.0pp) [gap匹配]
+  CL=F: null 梯度 +0.4pp (σ 2.1pp) [gap匹配]
+  GC=F: null 梯度 +0.3pp (σ 2.1pp) [gap匹配]
+  EURUSD=X: null 梯度 +0.2pp (σ 1.9pp) [gap匹配]
+  ^TNX: null 梯度 +0.3pp (σ 1.9pp) [gap匹配]
+  合并 null 梯度: 加密(连续) +0.3pp | 传统(gap匹配) +0.3pp (判据 无梯度<2pp)
+  H3 判据: GBM 同管线无梯度 -> PASS
+
+[对照-历史] c30 (2026-08-13): 加密 20 标的 ER_10 中位数 1h/4h/日线 27~32% 持平, 真实日线−1h +1.4pp vs GBM +0.3pp, 书断言在加密证伪; 书 CH1: 频率越低噪声越低 (语境=传统市场)
