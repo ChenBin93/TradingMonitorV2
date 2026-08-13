@@ -29,6 +29,17 @@
      包含 `gbm_seeds=` / `无条件基线` / `MIN_N` 三个 token 才能过 check_study ④
      (描述层会触发 1 个 ④WARN, 属预期, 不 FAIL)
 
+性能与调试约定 (2026-08-13 性能修复后, 必须遵守):
+   - **小批量调试先行**: 脚本支持 --dev 参数 (PARAMS dev_subset: 只跑前 3 标的 ×
+     GBM 3 种子、跳过 BY_YEAR/HOLDOUT), 管线 debug 用它 (~1-3 分钟); 最终 .out
+     必须全量 20 标的 × 30 种子 (script_sha256 锁定全量版本, dev 版不写 .out)
+   - pytest: 迭代期只跑相关测试文件 (如 research/tests/test_causal.py);
+     最终全量运行前跑一次 `python3 -m pytest research/tests -q` 门禁
+   - GBM 种子循环可用 multiprocessing.Pool (白名单已放开); 研究内确定性重算
+     (cluster 结果跨 grid 复用) 用 functools.lru_cache
+   - rolling_percentile 已 pandas 化 (~400x)、cluster_levels 已分桶 (~65x) —
+     禁止在研究脚本里自写逐根循环/线性扫描替代它们
+
 [DESCRIPTIVE] 分区 (仅描述层 c1x 需要时保留本段, 否则删除整段):
   以下结论为纯描述 (事后统计), 禁止进入交易含义:
   - {描述性统计项}: {说明}

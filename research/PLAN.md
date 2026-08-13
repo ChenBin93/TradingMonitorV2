@@ -89,6 +89,8 @@
 
 import 白名单 + `PARAMS` 唯一参数源 + **GATE 自检**（模板内置：GBM ≥30 种子、与研究同管线重放的无条件基线断言 ≈50%，失败 `SystemExit`——"违规即停"的技术落地）。自检用同一管线重放而非只调引擎，可暴露研究脚本自己的管线级错位。
 
+**性能与调试约定（2026-08-13）**：①小批量调试先行——脚本带 `--dev`（前 3 标的 × GBM 3 种子、跳过 BY_YEAR/HOLDOUT，~1-3 分钟），管线 debug 用它，最终 .out 必须全量（sha256 锁定全量版）；②pytest 迭代期只跑相关文件，全量门禁只在最终运行前跑一次；③GBM 种子循环用 multiprocessing（白名单已放开）、研究内确定性重算用 functools.lru_cache；④rolling_percentile（pandas 后端 ~400x）与 cluster_levels（分桶 ~65x）已优化，研究脚本禁止自写逐根循环/线性扫描替代；⑤机器 2 核/3.3GB，峰值内存敏感，chunk 化处理大矩阵。
+
 ### .out 格式
 
 ```
