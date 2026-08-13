@@ -1,0 +1,41 @@
+# meta: study_id=c25_state_direction date=2026-08-13 script_sha256=a99bfb5db84c2260a0df3bc278e7927f011983163f23778fcb3d420ba05a2739 data_range=2023-08..2026-08 params=tf=1h,4h,main=1h,W=24,T=1.0,warmup=600,gbm_seeds=30 gate=MIN_GBM_SEEDS=30,MIN_N=200
+# GATE: gbm_seeds=30 无条件基线(1:1 1h 全bar入场) long 真实 48.53% GBM 50.30% short 真实 51.47% GBM 49.70% [t1:1 PASS]; 状态对拍错位 0 [PASS]; E1探测器 GBM 50.12% [PASS]; MIN_N n_gbm=770340 [PASS]
+# RESULTS: 20 标的 × 1h/4h × 2023-08..2026-08; 条件层 c2x; 状态 = state_features 语义向量化 (GATE 对拍错位 0); 段首入场 = 状态进入第一根收盘 (market); 1:1 = evaluate_forward 对称口径 (T×ATR, W=24); E[R] 单位=ATR (win=+1, loss=−1, expired/skip=0); GBM = 首标×30 种子同管线
+
+[门槛] H1: ΔWR≥+3pp (trend_up 逆势 short) | H2: |ΔWR|≤1pp (trend_down 逆势 long) | H3: ΔWR≤-2pp (trend_up 顺势 long) | H4: 阶段 |梯度|<2pp | 成本: taker 0.05%×2 + 滑点 1bp + funding 0.01%×3 = 0.14%
+
+[H1主端点] 1h trend_up 段首 → short (逆势), 1:1 W=24:
+  1h trend_up→short: 真实 51.28% (n=21112) E+0.0254 | GBM 49.45% (n=23958) E-0.0109 | ΔWR +1.83pp ΔE +0.0363 E_cost 真实 -0.1054 [MIN_N 通过]
+     ΔWR z +3.86 p 0.000
+  [漂移分解] 无条件层 (真实−GBM, short): 真实 51.47% vs GBM 49.70% 净差 +1.77pp | 状态增量层 (真实格−真实无条件): 51.28% − 51.47% = -0.18pp [MIN_N 通过]
+
+[H2] 1h trend_down 段首 → long (逆势), |ΔWR|≤1pp:
+  1h trend_down→long: 真实 47.79% (n=20815) E-0.0437 | GBM 50.42% (n=24009) E+0.0084 | ΔWR -2.63pp ΔE -0.0521 E_cost 真实 -0.1733 [MIN_N 通过]
+[H3] 1h trend_up 段首 → long (顺势镜像), ΔWR≤-2pp:
+  1h trend_up→long: 真实 48.72% (n=21112) E-0.0254 | GBM 50.55% (n=23958) E+0.0109 | ΔWR -1.83pp ΔE -0.0363 E_cost 真实 -0.1562 [MIN_N 通过]
+
+[H4] 1h trend_up 阶段段首 → short (逆势), 无梯度 (|梯度|<2pp):
+  1h trend_up:early → short: 真实 51.78% (n=13434) E+0.0352 | GBM 48.97% (n=12895) E-0.0206 | ΔWR +2.81pp ΔE +0.0558 E_cost 真实 -0.0987 [MIN_N 通过]
+  1h trend_up:accelerate → short: 真实 52.21% (n=12105) E+0.0438 | GBM 49.52% (n=15685) E-0.0096 | ΔWR +2.69pp ΔE +0.0533 E_cost 真实 -0.0875 [MIN_N 通过]
+  1h trend_up:late → short: 真实 50.29% (n=17845) E+0.0057 | GBM 48.88% (n=23583) E-0.0224 | ΔWR +1.41pp ΔE +0.0281 E_cost 真实 -0.1244 [MIN_N 通过]
+     阶段 ΔWR 梯度: +1.40pp (<2pp 判据)
+
+[成本] 主端点 (1h trend_up→short): cost 0.14% of notional (taker 0.05%×2 + 滑点 1bp + funding 0.01%×3):
+  真实 E[R] +0.0254 cost +0.1308 E_cost -0.1054 | GBM E_cost -0.1307 | 净差E_cost +0.0253
+
+[Holm] 6 格 (状态 3 + 阶段 3) ΔWR 单侧 p + Holm 校正:
+  up_short: ΔWR +1.83pp p 0.000 p_adj 0.000
+  up_long: ΔWR -1.83pp p 1.000 p_adj 1.000
+  dn_long: ΔWR -2.63pp p 1.000 p_adj 1.000
+  stage_trend_up:early: ΔWR +2.81pp p 0.000 p_adj 0.000
+  stage_trend_up:accelerate: ΔWR +2.69pp p 0.000 p_adj 0.000
+  stage_trend_up:late: ΔWR +1.41pp p 0.002 p_adj 0.007
+  主端点 (trend_up→short): ΔWR +1.83pp p 0.000 p_adj 0.000
+
+[4h仅净差] (c17/c18: 4h 效应大部分=环境漂移, 不做门槛裁决):
+  4h trend_up→short: 真实 52.86% (n=4923) | GBM 49.99% (n=5414) | ΔWR +2.87pp ΔE +0.0569
+  4h trend_down→long: 真实 46.06% (n=4929) | GBM 50.44% (n=5370) | ΔWR -4.38pp ΔE -0.0867
+  4h trend_up→long: 真实 47.14% (n=4923) | GBM 50.01% (n=5414) | ΔWR -2.87pp ΔE -0.0569
+
+# BY_YEAR: 1h trend_up→short 2024 真实 51.16% (n=7468) GBM 49.91% (n=8209) | 1h trend_up→short 2025 真实 51.18% (n=6999) GBM 48.55% (n=8257) | 1h trend_up→short 2026 真实 52.07% (n=3931) GBM 49.61% (n=4689)
+# HOLDOUT: 主端点 trend_up→short 2026-06..08: 真实 50.35% (n=1144) GBM 51.35% (n=1367) | 净差WR -1.00pp (只报方向: 负/不可判)
