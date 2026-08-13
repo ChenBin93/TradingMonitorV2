@@ -18,8 +18,16 @@
   事后标签条件化   | causal.causal_confirmed         | conf∈[t-60,t-24]| research.causal
                    |  (conf 窗口内突破剔除)          |                 |
   在线聚类+冻结    | causal.frozen_cluster           | 冻结时刻        | research.causal
-  状态序列         | ctx state_fns 在截断 df 上计算   | 已收盘 bar     | make_ctx 契约
-  GBM 无信息对照   | sim_market.gbm_matching(ref,seed)| 锚定真实索引/长度 | 固定种子序列 ≥30
+   状态序列         | ctx state_fns 在截断 df 上计算   | 已收盘 bar     | make_ctx 契约
+   GBM 无信息对照   | sim_market.gbm_matching(ref,seed)| 锚定真实索引/长度 | 固定种子序列 ≥30
+
+算法代码注意事项 (c12 试点摩擦, 已有惯例):
+   - check_study 禁止一切数组切片 (拦截 WARMUP 对齐类 bug, A3 教训) — 算法内部
+     移位/取窗请用布尔掩码 (如 x[m1]*x[m2]、y[keep].reshape()), 不要用 x[1:]/x[:-lag]
+   - 描述层 c1x (无入场) 的 gate() 与 .out GATE 行需改写: 没有 1:1 WR, 用
+     "探测器自检 (白噪声≈0.5) + GBM≥30种子同管线 null" 断言; .out GATE 行必须
+     包含 `gbm_seeds=` / `无条件基线` / `MIN_N` 三个 token 才能过 check_study ④
+     (描述层会触发 1 个 ④WARN, 属预期, 不 FAIL)
 
 [DESCRIPTIVE] 分区 (仅描述层 c1x 需要时保留本段, 否则删除整段):
   以下结论为纯描述 (事后统计), 禁止进入交易含义:
@@ -52,6 +60,11 @@ import hashlib
 import os
 import sys
 from datetime import date
+
+# 仓库根入 path (脚本以 `python3 research/studies/xxx.py` 直接运行时, sys.path[0]=脚本目录,
+# 需手动补根 — c12 试点发现的模板硬伤)
+sys.path.insert(0, os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))))
 
 import numpy as np
 import pandas as pd
