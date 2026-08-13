@@ -1,0 +1,43 @@
+# meta: study_id=c13_trend_skew date=2026-08-13 script_sha256=b7f604132ac5ca3b9079cc8ab13bedbb89ea0fc13edcf2dc8b1429f12a3def91 data_range=2023-08..2026-08 params=tf=1h,4h,warmup=600,head_drop=120,top5_frac=0.05,gbm_seeds=30 gate=MIN_GBM_SEEDS=30,MIN_N=200(描述层不适用)
+# GATE: gbm_seeds=30 无条件基线(首标 全体bar收益偏度 1h): 真实 1.457 GBM 0.034 [PASS]; 顺K占比 真实 49.4% GBM 50.0% [PASS]; 探测器: 偏度估计器 -0.004∈±0.1 [PASS], 状态对拍错位0 [PASS], GBM30种子 up:late偏度 0.12≤+0.3 & dn:late偏度 -0.06≥-0.3 (1h/4h) [PASS]; MIN_N n_gbm_up=104891 n_gbm_dn=100691 [PASS]
+# RESULTS: 20 标的 × 1h/4h × 2023-08..2026-08; 描述层无入场, 无交易含义; 收益 r=close[t]/close[t-1]−1; 偏度=状态内组内偏度(事后统计); H2=top5%|r| 大 K 的顺趋势方向 |r| 占比; GBM=首标×30 种子同管线
+[门槛] 预注册: H1 up:late≥+1.5 dn:late≤-1.5 (GBM≤+0.3) | H2 top5%|r|顺趋势方向占比≥60% (GBM≈50%) | H3 |偏度| early→accel→late 单调不降
+
+[1h] 状态内单根收益 (真实 | GBM30种子):
+  range                    n 真实   12218 / GBM   12105 | 均值 真实 +0.0043% GBM +0.0142% | 偏度 真实 +1.23 GBM +0.06 Δ +1.16 [MIN_N 通过]
+  transition               n 真实  263223 / GBM  459963 | 均值 真实 +0.0012% GBM +0.0024% | 偏度 真实 +1.23 GBM +0.03 Δ +1.20 [MIN_N 通过]
+  trend_up:early           n 真实   25229 / GBM   19729 | 均值 真实 +0.0186% GBM -0.0769% | 偏度 真实 +0.21 GBM +0.09 Δ +0.12 [MIN_N 通过]
+  trend_up:accelerate      n 真实   22680 / GBM   25282 | 均值 真实 +0.1006% GBM +0.0109% | 偏度 真实 +0.37 GBM +0.11 Δ +0.26 [MIN_N 通过]
+  trend_up:late            n 真实   65748 / GBM  104891 | 均值 真实 +0.3048% GBM +0.3294% | 偏度 真实 +2.48 GBM +0.12 Δ +2.36 [MIN_N 通过]
+  trend_down:early         n 真实   25435 / GBM   19354 | 均值 真实 +0.0650% GBM +0.0622% | 偏度 真实 +0.29 GBM +0.00 Δ +0.29 [MIN_N 通过]
+  trend_down:accelerate    n 真实   28080 / GBM   24785 | 均值 真实 -0.0652% GBM -0.0210% | 偏度 真实 +0.41 GBM -0.05 Δ +0.46 [MIN_N 通过]
+  trend_down:late          n 真实   63544 / GBM  100691 | 均值 真实 -0.3406% GBM -0.3096% | 偏度 真实 -3.24 GBM -0.06 Δ -3.18 [MIN_N 通过]
+  up_agg                   n 真实  113657 / GBM  149902 | 均值 真实 +0.2005% GBM +0.2222% | 偏度 真实 +1.86 GBM +0.05 Δ +1.82 [MIN_N 通过]
+  dn_agg                   n 真实  117059 / GBM  144830 | 均值 真实 -0.1864% GBM -0.2105% | 偏度 真实 -2.15 GBM +0.02 Δ -2.17 [MIN_N 通过]
+  all                      n 真实  506157 / GBM  766800 | 均值 真实 +0.0027% GBM +0.0054% | 偏度 真实 +0.25 GBM +0.03 Δ +0.22 [MIN_N 通过]
+  [H1-1h] trend_up:late 偏度: 真实 +2.48 (n=65748) | GBM +0.12 (n=104891) | Δ +2.36 [MIN_N 通过]
+  [H1-1h] trend_down:late 偏度: 真实 -3.24 (n=63544) | GBM -0.06 (n=100691) | Δ -3.18 [MIN_N 通过]
+  [H2-1h] top5%|r| 顺趋势方向占比 trend_up:late: 真实 87.9% (n=65748) | GBM 89.2% (n=104891) | 净差 -1.2pp [MIN_N 通过]
+  [H2-1h] top5%|r| 顺趋势方向占比 trend_down:late: 真实 87.5% (n=63544) | GBM 86.0% (n=100691) | 净差 +1.5pp [MIN_N 通过]
+  [H2d-1h] C_share 诊断 (top5%|r| 顺趋势 |r| / 全部顺趋势 |r|): up:late 真实 30.3% GBM 18.8% | dn:late 真实 30.7% GBM 18.1%
+  [H3-1h] |偏度| 单调 (真实): up early +0.21 accel +0.37 late +2.48 | dn early +0.29 accel +0.41 late +3.24
+[4h] 状态内单根收益 (真实 | GBM30种子):
+  range                    n 真实    2503 / GBM    2776 | 均值 真实 -0.0209% GBM +0.0226% | 偏度 真实 +0.64 GBM +0.08 Δ +0.56 [MIN_N 通过]
+  transition               n 真实   59001 / GBM  106292 | 均值 真实 -0.0110% GBM +0.0118% | 偏度 真实 +0.67 GBM +0.06 Δ +0.61 [MIN_N 通过]
+  trend_up:early           n 真实    5753 / GBM    4577 | 均值 真实 +0.0267% GBM -0.1614% | 偏度 真实 +0.45 GBM +0.13 Δ +0.32 [MIN_N 通过]
+  trend_up:accelerate      n 真实    4967 / GBM    5522 | 均值 真实 +0.2309% GBM -0.0008% | 偏度 真实 +0.55 GBM +0.11 Δ +0.44 [MIN_N 通过]
+  trend_up:late            n 真实   15442 / GBM   23707 | 均值 真实 +0.6269% GBM +0.6430% | 偏度 真实 +1.83 GBM +0.15 Δ +1.67 [MIN_N 通过]
+  trend_down:early         n 真实    5930 / GBM    4378 | 均值 真实 +0.1685% GBM +0.0897% | 偏度 真实 +0.93 GBM +0.01 Δ +0.92 [MIN_N 通过]
+  trend_down:accelerate    n 真实    6601 / GBM    5692 | 均值 真实 -0.1863% GBM -0.0745% | 偏度 真实 -0.05 GBM +0.02 Δ -0.06 [MIN_N 通过]
+  trend_down:late          n 真实   15545 / GBM   22556 | 均值 真实 -0.6201% GBM -0.5750% | 偏度 真实 -1.35 GBM -0.01 Δ -1.34 [MIN_N 通过]
+  up_agg                   n 真实   26162 / GBM   33806 | 均值 真实 +0.4197% GBM +0.4289% | 偏度 真实 +1.43 GBM +0.07 Δ +1.36 [MIN_N 通过]
+  dn_agg                   n 真实   28076 / GBM   32626 | 均值 真实 -0.3516% GBM -0.3985% | 偏度 真实 -0.90 GBM +0.05 Δ -0.96 [MIN_N 通过]
+  all                      n 真实  115742 / GBM  175500 | 均值 真实 +0.0035% GBM +0.0161% | 偏度 真实 +0.36 GBM +0.07 Δ +0.29 [MIN_N 通过]
+  [H1-4h] trend_up:late 偏度: 真实 +1.83 (n=15442) | GBM +0.15 (n=23707) | Δ +1.67 [MIN_N 通过]
+  [H1-4h] trend_down:late 偏度: 真实 -1.35 (n=15545) | GBM -0.01 (n=22556) | Δ -1.34 [MIN_N 通过]
+  [H2-4h] top5%|r| 顺趋势方向占比 trend_up:late: 真实 90.7% (n=15442) | GBM 89.6% (n=23707) | 净差 +1.1pp [MIN_N 通过]
+  [H2-4h] top5%|r| 顺趋势方向占比 trend_down:late: 真实 81.2% (n=15545) | GBM 83.8% (n=22556) | 净差 -2.6pp [MIN_N 通过]
+  [H2d-4h] C_share 诊断 (top5%|r| 顺趋势 |r| / 全部顺趋势 |r|): up:late 真实 30.2% GBM 19.0% | dn:late 真实 27.9% GBM 17.8%
+  [H3-4h] |偏度| 单调 (真实): up early +0.45 accel +0.55 late +1.83 | dn early +0.93 accel +0.05 late +1.35
+
+# BY_YEAR: 1h 2024 up:late偏度 真实+1.99 GBM+0.11 | dn:late偏度 真实-2.12 GBM-0.05 | H2-up 真实85.3% GBM88.5% | H2-dn 真实88.4% GBM85.8% | 1h 2025 up:late偏度 真实+3.41 GBM+0.12 | dn:late偏度 真实-4.29 GBM-0.06 | H2-up 真实89.5% GBM89.6% | H2-dn 真实85.3% GBM86.1% | 1h 2026 up:late偏度 真实+1.58 GBM+0.12 | dn:late偏度 真实-1.56 GBM-0.07 | H2-up 真实90.6% GBM89.5% | H2-dn 真实93.3% GBM86.1% | 4h 2024 up:late偏度 真实+1.78 GBM+0.16 | dn:late偏度 真实-1.30 GBM-0.02 | H2-up 真实91.7% GBM89.5% | H2-dn 真实77.8% GBM84.8% | 4h 2025 up:late偏度 真实+2.01 GBM+0.17 | dn:late偏度 真实-1.44 GBM-0.01 | H2-up 真实88.8% GBM90.8% | H2-dn 真实84.8% GBM82.8% | 4h 2026 up:late偏度 真实+1.51 GBM+0.08 | dn:late偏度 真实-0.58 GBM-0.03 | H2-up 真实90.3% GBM86.5% | H2-dn 真实85.4% GBM85.0%
