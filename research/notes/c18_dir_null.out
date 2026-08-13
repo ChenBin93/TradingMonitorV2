@@ -1,0 +1,43 @@
+# meta: study_id=c18_dir_null date=2026-08-13 script_sha256=ac67a61f1b2eff832da4b4664a9f67ad55f42a514ab35e4b1581cf120739588f data_range=2023-08..2026-08 params=tf=1h,4h,states=trend_up,trend_down,neutral,sides=long,short,combo=(2, 0.3),W=24,T=1.0,warmup=600,gbm_seeds=30 gate=MIN_GBM_SEEDS=30,MIN_N=200
+# GATE: gbm_seeds=30 无条件基线(1:1 1h long, 全bar入场) 真实 48.53% GBM 50.30% [t1:1 PASS]; c11方向探测器 GBM30种子无条件E1 50.12% [PASS]; MIN_N n_gbm=769681 [PASS]
+# RESULTS: 20 标的 × 1h/4h × 2023-08..2026-08; 描述层无入场, 无交易含义; E1 = P(close[t+W] > close[t]) (long 侧) / P(close[t+W] < close[t]) (short 侧), W=24, 状态段首入场; 1:1 = outcome.evaluate_forward 对称口径 (T×ATR, W=24), 触碰段首入场 (levels.cluster_levels 在线聚类+冻结)
+
+[H1-c11] 12 状态格 E1 端点方向概率 (真实 vs GBM 首标×30种子同管线):
+  1h trend_up long: 真实 47.57% (n=21112) | GBM 50.54% (n=23958) | 净差 -2.98pp [MIN_N 通过]
+  1h trend_up short: 真实 52.16% (n=21112) | GBM 49.46% (n=23958) | 净差 +2.71pp [MIN_N 通过]
+  1h trend_down long: 真实 50.00% (n=20815) | GBM 50.00% (n=24009) | 净差 +0.00pp [MIN_N 通过]
+  1h trend_down short: 真实 49.83% (n=20815) | GBM 50.00% (n=24009) | 净差 -0.17pp [MIN_N 通过]
+  1h neutral long: 真实 47.79% (n=12910) | GBM 49.89% (n=15773) | 净差 -2.10pp [MIN_N 通过]
+  1h neutral short: 真实 52.02% (n=12910) | GBM 50.11% (n=15773) | 净差 +1.91pp [MIN_N 通过]
+  4h trend_up long: 真实 46.64% (n=4923) | GBM 51.27% (n=5414) | 净差 -4.64pp [MIN_N 通过]
+  4h trend_up short: 真实 53.30% (n=4923) | GBM 48.73% (n=5414) | 净差 +4.58pp [MIN_N 通过]
+  4h trend_down long: 真实 48.10% (n=4929) | GBM 50.78% (n=5370) | 净差 -2.68pp [MIN_N 通过]
+  4h trend_down short: 真实 51.73% (n=4929) | GBM 49.22% (n=5370) | 净差 +2.52pp [MIN_N 通过]
+  4h neutral long: 真实 47.18% (n=3018) | GBM 49.59% (n=3628) | 净差 -2.40pp [MIN_N 通过]
+  4h neutral short: 真实 52.82% (n=3018) | GBM 50.41% (n=3628) | 净差 +2.40pp [MIN_N 通过]
+
+[A1-c11] 无条件 E1 (漂移参考, 全 bar):
+  1h 无条件: 真实 49.05% (n=508077) | GBM 50.12% (n=769680) | 净差 -1.08pp [MIN_N 通过]
+  4h 无条件: 真实 47.36% (n=117662) | GBM 49.81% (n=178380) | 净差 -2.45pp [MIN_N 通过]
+
+[诊断-c11] 细分阶段段首 E1 (真实, long 侧, 解释合并态构成):
+  1h: trend_up:early 47.11% (n=13434) | trend_up:accelerate 46.40% (n=12105) | trend_up:late 46.83% (n=17845) | trend_down:early 49.91% (n=13774) | trend_down:accelerate 51.23% (n=14060) | trend_down:late 50.78% (n=18633)
+  4h: trend_up:early 44.18% (n=3050) | trend_up:accelerate 43.00% (n=2727) | trend_up:late 47.76% (n=4195) | trend_down:early 45.50% (n=3221) | trend_down:accelerate 50.09% (n=3205) | trend_down:late 50.94% (n=4434)
+
+[H1-c18] 4 触位格 1:1 胜率 (真实 vs GBM 首标×30种子; 无条件 = 同方向全bar入场基线):
+  1h 涨触阻 (short): 真实 51.16% (n=119441) | GBM 49.91% (n=215140) | 净差 +1.24pp | 真实−无条件(short) -0.31pp | GBM−无条件(short) +0.21pp [MIN_N 通过]
+  1h 跌触阻 (long): 真实 48.18% (n=120575) | GBM 50.40% (n=214094) | 净差 -2.23pp | 真实−无条件(long) -0.36pp | GBM−无条件(long) +0.10pp [MIN_N 通过]
+  1h 涨触撑 (short): 真实 51.10% (n=116777) | GBM 49.60% (n=210755) | 净差 +1.50pp | 真实−无条件(short) -0.37pp | GBM−无条件(short) -0.10pp [MIN_N 通过]
+  1h 跌触撑 (long): 真实 48.22% (n=123859) | GBM 50.36% (n=212307) | 净差 -2.13pp | 真实−无条件(long) -0.31pp | GBM−无条件(long) +0.06pp [MIN_N 通过]
+  4h 涨触阻 (short): 真实 50.72% (n=20201) | GBM 50.17% (n=32924) | 净差 +0.55pp | 真实−无条件(short) -1.53pp | GBM−无条件(short) +0.46pp [MIN_N 通过]
+  4h 跌触阻 (long): 真实 48.28% (n=19973) | GBM 50.25% (n=32378) | 净差 -1.97pp | 真实−无条件(long) +0.53pp | GBM−无条件(long) -0.04pp [MIN_N 通过]
+  4h 涨触撑 (short): 真实 51.55% (n=20268) | GBM 49.49% (n=32624) | 净差 +2.06pp | 真实−无条件(short) -0.70pp | GBM−无条件(short) -0.21pp [MIN_N 通过]
+  4h 跌触撑 (long): 真实 47.91% (n=22170) | GBM 50.12% (n=32920) | 净差 -2.20pp | 真实−无条件(long) +0.16pp | GBM−无条件(long) -0.18pp [MIN_N 通过]
+
+[A1-c18] 无条件 1:1 基线 (全 bar 入场, 真实 vs GBM):
+  1h long: 真实 48.53% (n=502753) | GBM 50.30% (n=769681) | 净差 -1.77pp
+  1h short: 真实 51.47% (n=502753) | GBM 49.70% (n=769681) | 净差 +1.77pp
+  4h long: 真实 47.75% (n=116786) | GBM 50.30% (n=178779) | 净差 -2.54pp
+  4h short: 真实 52.25% (n=116786) | GBM 49.70% (n=178779) | 净差 +2.54pp
+
+# BY_YEAR: 1h trend_up long 2024 真实 47.65% (n=7539) GBM 50.44% (n=8221) | 1h trend_up long 2025 真实 46.94% (n=7118) GBM 51.60% (n=8264) | 1h trend_up long 2026 真实 46.29% (n=3966) GBM 48.45% (n=4698) | 1h trend_up short 2024 真实 52.16% (n=7539) GBM 49.56% (n=8221) | 1h trend_up short 2025 真实 52.81% (n=7118) GBM 48.40% (n=8264) | 1h trend_up short 2026 真实 53.35% (n=3966) GBM 51.55% (n=4698) | 1h trend_down long 2024 真实 50.02% (n=7353) GBM 50.16% (n=8240) | 1h trend_down long 2025 真实 49.18% (n=7053) GBM 50.19% (n=8251) | 1h trend_down long 2026 真实 48.35% (n=3981) GBM 48.65% (n=4728) | 1h trend_down short 2024 真实 49.80% (n=7353) GBM 49.84% (n=8240) | 1h trend_down short 2025 真实 50.67% (n=7053) GBM 49.81% (n=8251) | 1h trend_down short 2026 真实 51.49% (n=3981) GBM 51.35% (n=4728) | 1h neutral long 2024 真实 48.17% (n=4443) GBM 49.58% (n=5428) | 1h neutral long 2025 真实 45.56% (n=4394) GBM 50.32% (n=5419) | 1h neutral long 2026 真实 47.30% (n=2560) GBM 48.26% (n=3073) | 1h neutral short 2024 真实 51.68% (n=4443) GBM 50.42% (n=5428) | 1h neutral short 2025 真实 54.32% (n=4394) GBM 49.68% (n=5419) | 1h neutral short 2026 真实 52.38% (n=2560) GBM 51.74% (n=3073) | 1h 涨触阻 2024 真实 51.26% (n=39991) GBM 50.20% (n=69993) | 1h 涨触阻 2025 真实 50.68% (n=47310) GBM 49.72% (n=79453) | 1h 涨触阻 2026 真实 52.74% (n=24734) GBM 49.80% (n=52648) | 1h 跌触阻 2024 真实 48.25% (n=41004) GBM 50.35% (n=69627) | 1h 跌触阻 2025 真实 48.06% (n=47397) GBM 50.57% (n=79674) | 1h 跌触阻 2026 真实 47.43% (n=24810) GBM 50.19% (n=52165) | 1h 涨触撑 2024 真实 51.34% (n=38832) GBM 49.65% (n=69505) | 1h 涨触撑 2025 真实 50.69% (n=46852) GBM 49.50% (n=77501) | 1h 涨触撑 2026 真实 52.41% (n=24891) GBM 49.68% (n=51144) | 1h 跌触撑 2024 真实 48.22% (n=42377) GBM 50.16% (n=69913) | 1h 跌触撑 2025 真实 48.27% (n=48073) GBM 50.66% (n=78304) | 1h 跌触撑 2026 真实 47.37% (n=26043) GBM 50.21% (n=51194) | 4h trend_up long 2024 真实 53.82% (n=1988) GBM 52.41% (n=2055) | 4h trend_up long 2025 真实 42.55% (n=1779) GBM 50.00% (n=1964) | 4h trend_up long 2026 真实 38.30% (n=953) GBM 52.35% (n=1129) | 4h trend_up short 2024 真实 46.18% (n=1988) GBM 47.59% (n=2055) | 4h trend_up short 2025 真实 57.45% (n=1779) GBM 50.00% (n=1964) | 4h trend_up short 2026 真实 61.49% (n=953) GBM 47.65% (n=1129) | 4h trend_down long 2024 真实 52.75% (n=1907) GBM 51.51% (n=2050) | 4h trend_down long 2025 真实 46.46% (n=1834) GBM 49.04% (n=1933) | 4h trend_down long 2026 真实 39.20% (n=995) GBM 52.78% (n=1116) | 4h trend_down short 2024 真实 47.14% (n=1907) GBM 48.49% (n=2050) | 4h trend_down short 2025 真实 53.44% (n=1834) GBM 50.96% (n=1933) | 4h trend_down short 2026 真实 60.60% (n=995) GBM 47.22% (n=1116) | 4h neutral long 2024 真实 49.25% (n=1137) GBM 52.88% (n=1335) | 4h neutral long 2025 真实 44.82% (n=1100) GBM 46.52% (n=1320) | 4h neutral long 2026 真实 46.57% (n=627) GBM 50.07% (n=767) | 4h neutral short 2024 真实 50.75% (n=1137) GBM 47.12% (n=1335) | 4h neutral short 2025 真实 55.18% (n=1100) GBM 53.48% (n=1320) | 4h neutral short 2026 真实 53.43% (n=627) GBM 49.93% (n=767) | 4h 涨触阻 2024 真实 50.25% (n=6378) GBM 49.57% (n=9640) | 4h 涨触阻 2025 真实 50.06% (n=9175) GBM 50.34% (n=13910) | 4h 涨触阻 2026 真实 53.27% (n=4340) GBM 50.34% (n=9020) | 4h 跌触阻 2024 真实 48.53% (n=6415) GBM 50.63% (n=9341) | 4h 跌触阻 2025 真实 48.35% (n=9125) GBM 50.33% (n=13680) | 4h 跌触阻 2026 真实 47.34% (n=4113) GBM 49.62% (n=8966) | 4h 涨触撑 2024 真实 51.83% (n=6222) GBM 49.40% (n=9275) | 4h 涨触撑 2025 真实 50.59% (n=9224) GBM 49.09% (n=13883) | 4h 涨触撑 2026 真实 53.36% (n=4646) GBM 50.19% (n=9103) | 4h 跌触撑 2024 真实 47.82% (n=7117) GBM 50.25% (n=9556) | 4h 跌触撑 2025 真实 48.89% (n=9816) GBM 50.47% (n=13900) | 4h 跌触撑 2026 真实 45.87% (n=4886) GBM 49.42% (n=9073)
