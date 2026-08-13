@@ -34,6 +34,7 @@ TradingMonitor V2 — OKX 永续合约实时监控 + 量化研究系统。Python
 
 ## 文档
 - research/PLAN.md — **研究权威文档**（C 系列协议：三层门禁/编号分层/脚本模板/发布门槛/路线图）
+- **docs/RESEARCH_C_SERIES_SUMMARY.md — C 系列最终总结（2026-08-13）：13 项研究结果总表、可信事实清单、Phase 2 四候选全负结论与四条方法学教训；研究数字的唯一速查入口**
 - docs/LIVE_SYSTEM.md — 当前 live 系统规格；**运行规格类内容（端口/启动/推送时间窗/live 数据流）仍有效**；涉及研究数字的段落（SCENE_WR 胜率表、关键位质量分、"类型A 贴位"等）已加作废戳与行内标注（2026-08-12），不采信
 - docs/SESSION_SUMMARY.md — 已加作废戳（2026-08-12 批次作废），研究结论速查不再可采信
 - docs/MARKET_STATE_STRATEGY_MAP.md — 已加作废戳，不采信
