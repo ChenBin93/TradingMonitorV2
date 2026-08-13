@@ -84,33 +84,34 @@ def cluster_levels(high, low, atr, k=K, tolerance_mult=0.3, min_touch=2):
         events.append((confirm, pos, price, "support"))
     events.sort()
 
-    formed = []   # 已冻结位带 (cluster), 按 (side, price) 排序维护
-    pending = []  # 未形成组 [side, prices, events]; events: [(confirm, pos)] 升序
+    formed = []   # 已冻结位带 (cluster), 按 (side, price) 排序维护 (输出语义不变)
+    pending = []  # 未形成组 [side, prices, events, median]; median 为缓存 (仅合并时重算)
+
+    # 分桶索引 (性能优化, 输出逐位不变):
+    #   side_prices[side] = 该侧已形成位价格升序数组
+    #   side_lvls[side]   = 并行数组, 每个价格对应的 Level 列表 (保持 formed 内顺序:
+    #                       同价格组内最新在前 — insert_formed 插入首位语义一致)
+    side_prices = {"resistance": [], "support": []}
+    side_lvls = {"resistance": [], "support": []}
 
     def find_near(price, side, tol):
-        """二分查找同侧 price ± tol 内的已形成位带"""
-        lo, hi = 0, len(formed)
-        while lo < hi:
-            mid = (lo + hi) // 2
-            if formed[mid].side < side or (formed[mid].side == side and formed[mid].price < price):
-                lo = mid + 1
-            else:
-                hi = mid
-        # 从插入点向两侧扫 ±tol
-        i = lo
-        while i < len(formed) and formed[i].side == side and formed[i].price <= price + tol:
-            if abs(formed[i].price - price) <= tol:
-                return formed[i]
-            i += 1
-        i = lo - 1
-        while i >= 0 and formed[i].side == side and formed[i].price >= price - tol:
-            if abs(formed[i].price - price) <= tol:
-                return formed[i]
-            i -= 1
+        """分桶二分 — 与原 find_near 语义逐位一致:
+        优先返回同侧 price >= 事件价的最小者 (同价组取 formed 首位/最新);
+        否则返回同侧 price < 事件价的最大者 (同价组取 formed 末位/最旧);
+        均须 |diff| <= tol, 否则 None."""
+        pr = side_prices[side]
+        lv_at = side_lvls[side]
+        idx = bisect.bisect_left(pr, price)
+        if idx < len(pr) and pr[idx] <= price + tol:
+            return lv_at[idx][0]
+        if idx > 0:
+            j = idx - 1
+            if pr[j] >= price - tol:
+                return lv_at[j][-1]
         return None
 
     def insert_formed(lv):
-        """按 (side, price) 插入已形成位带 (保持排序)"""
+        """按 (side, price) 插入已形成位带 (保持排序) — 输出列表语义不变"""
         lo, hi = 0, len(formed)
         while lo < hi:
             mid = (lo + hi) // 2
@@ -120,6 +121,18 @@ def cluster_levels(high, low, atr, k=K, tolerance_mult=0.3, min_touch=2):
                 hi = mid
         formed.insert(lo, lv)
 
+    def insert_level(lv):
+        """formed (输出) 与分桶索引同步插入"""
+        insert_formed(lv)
+        pr = side_prices[lv.side]
+        lv_at = side_lvls[lv.side]
+        k = bisect.bisect_left(pr, lv.price)
+        pr.insert(k, lv.price)
+        if k < len(lv_at) and lv_at[k] and lv_at[k][0].price == lv.price:
+            lv_at[k].insert(0, lv)   # 同价格组: 插入最前 (最新在前, 与 formed 一致)
+        else:
+            lv_at.insert(k, [lv])
+
     for confirm, pos, price, side in events:
         tol = atr[min(confirm, len(atr) - 1)] * tolerance_mult if len(atr) else 1e-9
         tol = max(tol, 1e-9)
@@ -128,15 +141,16 @@ def cluster_levels(high, low, atr, k=K, tolerance_mult=0.3, min_touch=2):
         if lv is not None:
             lv._touches.append((confirm, pos))
             continue
-        # 2) 尝试并入未形成组
+        # 2) 尝试并入未形成组 (median 缓存: 每事件不再逐组 np.median, 仅合并时重算)
         merged = False
         for grp in pending:
-            if grp[0] == side and abs(float(np.median(grp[1])) - price) <= tol:
+            if grp[0] == side and abs(grp[3] - price) <= tol:
                 grp[1].append(price)
                 grp[2].append((confirm, pos))
+                grp[3] = float(np.median(grp[1]))
                 if len(grp[1]) >= min_touch:
-                    insert_formed(Level(
-                        price=float(np.median(grp[1])),
+                    insert_level(Level(
+                        price=grp[3],
                         side=side,
                         touch_count=len(grp[1]),
                         last_touch_idx=grp[2][-1][1],
@@ -150,7 +164,7 @@ def cluster_levels(high, low, atr, k=K, tolerance_mult=0.3, min_touch=2):
                 merged = True
                 break
         if not merged:
-            pending.append([side, [price], [(confirm, pos)]])
+            pending.append([side, [price], [(confirm, pos)], float(price)])
     return formed
 
 

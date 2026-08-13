@@ -60,6 +60,9 @@ THIRD_PARTY = frozenset({
     "numpy", "pandas", "scipy", "statsmodels", "pywt", "collections",
     "bisect", "os", "sys", "gc", "dataclasses", "math", "json", "time",
     "datetime",
+    # 性能: GBM 种子循环/标的分层可并行 (机器 2 核); functools.lru_cache
+    # 用于研究内确定性重算消除 (如 cluster 结果跨 grid 复用)
+    "multiprocessing", "concurrent.futures", "functools",
 })
 # 例外: hashlib 为 .out meta 运行时计算 script_sha256 的必需模块 (PLAN §3 模板
 # 骨架要求 meta 含运行时 sha256); __future__ 为语法指令 (PEP 236), 语义惰性。
