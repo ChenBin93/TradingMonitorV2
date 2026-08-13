@@ -1,0 +1,37 @@
+# meta: study_id=c33_daily_run_faithful date=2026-08-13 script_sha256=ca0a5f162ff3133297dcf8e5fbd5f69ed4cc724d63e8581c4937f6054e7c9cf2 data_range=传统 max 历史 (SPY 1993-/^TNX 1962-) / 加密 2023-08..2026-08 params=control=SPY+CL=F+GC=F+EURUSD=X+^TNX,crypto=BTC/USDT:USDT+ETH/USDT:USDT,k_main=6,gap_mult=2.0,gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(传统合并 N(run≥6)): 真实 769 | 硬币均值 662.6999999999999 [PASS]; 探测器自检 run 状态机 golden [PASS]; 硬币基准 sanity (mean≈n/64) [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c33 日线运行肥尾忠实复现 (Q2 书原口径: 日线 + 对称硬币 + run of 6); run=sign(close_t−close_{{t−1}}), 0 变化计延续, gap(>2×标准间隔)断; N(run≥k) 计数; 双基准: 对称硬币 (忠实) + 漂移 GBM (修正, c18); 描述层无入场, 无交易含义
+
+[run≥k 计数] 每标的 N(run≥6/8/10) + N(run≥12):
+  SPY (n_diff=8441): N6=105 N8=24 N10=5 N12=2 | P12=0.0005 ([MIN_N 通过])
+  CL=F (n_diff=6520): N6=90 N8=22 N10=2 N12=1 | P12=0.0003 ([MIN_N 不足])
+  GC=F (n_diff=6511): N6=91 N8=28 N10=5 N12=0 | P12=0.0000 ([MIN_N 不足])
+  EURUSD=X (n_diff=5889): N6=80 N8=12 N10=2 N12=0 | P12=0.0000 ([MIN_N 不足])
+  ^TNX (n_diff=16140): N6=403 N8=147 N10=65 N12=31 | P12=0.0045 ([MIN_N 通过])
+  BTC/USDT:USDT (n_diff=1095): N6=14 N8=2 N10=0 N12=0 | P12=0.0000 ([MIN_N 不足])
+  ETH/USDT:USDT (n_diff=1095): N6=17 N8=3 N10=0 N12=0 | P12=0.0000 ([MIN_N 不足])
+
+[H1] 传统日线 N(run≥6) vs 对称硬币 95% 区间 (30 种子):
+  SPY: 真实 N6=105 | 硬币 [112, 143] (mean 128, σ 9) | 低于↓
+  CL=F: 真实 N6=90 | 硬币 [84, 117] (mean 98, σ 9) | 区间内
+  GC=F: 真实 N6=91 | 硬币 [84, 117] (mean 98, σ 9) | 区间内
+  EURUSD=X: 真实 N6=80 | 硬币 [75, 103] (mean 89, σ 8) | 区间内
+  ^TNX: 真实 N6=403 | 硬币 [223, 270] (mean 250, σ 14) | 超出↑
+  H1 判据: N6 超出硬币 95% 上界 -> 1/5
+
+[H2] 加密日线 N(run≥6) vs 对称硬币 95% 区间 (30 种子):
+  BTC/USDT:USDT: 真实 N6=14 | 硬币 [11, 23] (mean 16, σ 4) | 区间内
+  ETH/USDT:USDT: 真实 N6=17 | 硬币 [11, 23] (mean 16, σ 4) | 区间内
+  H2 判据: N6 超出硬币 95% 上界 -> 0/2
+
+[H3] 漂移 GBM 基准 (μ/σ 样本, 30 种子) 下真实仍超出:
+  SPY: 真实 N6=105 | 漂移GBM [114, 146] (mean 134, σ 9) | 低于↓
+  CL=F: 真实 N6=90 | 漂移GBM [88, 116] (mean 103, σ 8) | 区间内
+  GC=F: 真实 N6=91 | 漂移GBM [87, 118] (mean 104, σ 9) | 区间内
+  EURUSD=X: 真实 N6=80 | 漂移GBM [80, 104] (mean 93, σ 8) | 低于↓
+  ^TNX: 真实 N6=403 | 漂移GBM [231, 272] (mean 252, σ 13) | 超出↑
+  BTC/USDT:USDT: 真实 N6=14 | 漂移GBM [13, 25] (mean 18, σ 3) | 区间内
+  ETH/USDT:USDT: 真实 N6=17 | 漂移GBM [13, 23] (mean 17, σ 3) | 区间内
+  H3 判据: 漂移 GBM 下真实仍超出 -> 1/7
+
+[对照-历史] c31 (2026-08-13): 1h/3y/GBM 口径 run 薄尾 (加密 z8=-9.45, 传统 z8=-4.84) — 口径错位 (非书日线锚点); c18 (2026-08-13): 4h 方向由无条件漂移主导 — 硬币基准会把漂移误判为肥尾, 故 c33 双基准; 书 CH1/CH8: 日线 run of 6 超出对称硬币 = 趋势利润来源

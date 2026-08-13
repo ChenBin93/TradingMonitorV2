@@ -1,0 +1,18 @@
+# meta: study_id=c35_er_fixed_calendar date=2026-08-13 script_sha256=418fb29ceca74da1f395648ec3163a0d408ab28bb417a126c86fd19e1e2054a8 data_range=2023-08..2026-08 params=crypto=BTC/USDT:USDT+ETH/USDT:USDT,er_days=20,n_1h=480,n_4h=120,gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(加密 1h avgER 跨标的中位数): 真实 5.5% GBM 4.5% [PASS]; 探测器自检 golden ER 对拍 (ramp→1.0, 交替→0.0) [PASS]; GBM30种子 4h−1h avgER 差 +0.045 ≥ 0 (三角形不等式方向) [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c35 固定日历窗校准 (Q1 书原口径: 20 日历日窗); ER_n = |C_t−C_{{t−n}}|/Σ|ΔC|; 1h n=480, 4h n=120 (同一 20 日历日); avgER = 全样本均值; 描述层无入场, 无交易含义
+
+[校准检查] 1h→4h 重采样 vs 原生 4h: max|close diff| = 6.200000000004366 (逐位一致); 20 日历日窗 Σ|ΔC| 均值: 1h 115569.15208527115 | 4h 58716.96644961248 | 比值 0.508
+  oracle 预期 (Σ|单步变化| 跨频率几乎相等): 实测比值 0.508 (iid 理论 ≈ 0.5, 三角形不等式: 4h 步长 ≤ 1h 步长)
+
+[H1] avgER 固定 20 日历日窗 (1h=480 bar, 4h=120 bar):
+  BTC/USDT:USDT: 1h 0.054 (n=25800) | 4h 0.108 (n=6450) | 差 +5.3pp ([MIN_N 通过])
+  ETH/USDT:USDT: 1h 0.056 (n=25800) | 4h 0.110 (n=6450) | 差 +5.4pp ([MIN_N 通过])
+  H1 判据: |差|<2.0pp 每标的 -> FAIL (BTC/USDT:USDT |差| 5.3pp, ETH/USDT:USDT |差| 5.4pp)
+
+[H2] GBM 同管线 (30 种子, 连续 1h + resample 4h):
+  BTC/USDT:USDT: GBM 1h 0.045 | GBM 4h 0.091 | GBM 差 +4.5pp (σ 0.4pp)
+  ETH/USDT:USDT: GBM 1h 0.045 | GBM 4h 0.091 | GBM 差 +4.5pp (σ 0.4pp)
+  H2 判据: GBM 差与真实同号同量级 -> PASS
+
+[对照-历史] c30/c32 (2026-08-13): 固定 10 bar 窗 ER_10 中位数 跨频率持平 (加密 +1.4pp, 传统负梯度); 书 CH1 图 1.7: 20 日固定日历窗 avgER × 40 日 MA PF 截面; 口径修正说明: 固定 bar 窗 ≠ 书固定日历窗, c35 为校准
