@@ -1,0 +1,40 @@
+# meta: study_id=c22_tail_harvest date=2026-08-13 script_sha256=d1458479b2355953b25359cf42b580b862180949716704143d4cd4dd443c7da0 data_range=2023-08..2026-08 params=tf=1h,4h,main=1h,sl_mode=atr,sl_mult=1.0,trail=3.0,W=384,warmup=600,gbm_seeds=30 gate=MIN_GBM_SEEDS=30,MIN_N=200
+# GATE: gbm_seeds=30 无条件基线(GBM 主端点 hold win率 1h trend_up→long) 真实 33.37% GBM 32.62% [hold]; 探测器: GBM主端点−无条件期望 0.0454R ∈±0.05R [PASS], GBM无条件期望 0.5435R (hold 引擎 stop+trail 机械期望, 如实报告), 状态对拍错位 0 [PASS]; MIN_N n_gbm=23640 [PASS]
+# RESULTS: 20 标的 × 1h/4h × 2023-08..2026-08; 条件层 c2x; hold = hold_sim.simulate_holds (sl_mode=atr 固定1×ATR止损 + peak_trail=3×ATR 峰值回撤退出, exit_late=False, w=384); R 单位 = ATR (r_base=atr[i]); GBM = 首标×30 种子同管线
+
+[门槛] H1: 期望差≥+0.10R | H3: 集中度增量≥+0.05R | 成本: taker 0.05%×2 + 滑点 1bp + funding 0.01%/8h 按持仓时长
+
+[H1主端点] 1h trend_up 段首 → long (hold, atr止损1×ATR + trail 3×ATR, w=384):
+  1h trend_up→long: 真实 +0.4443R (n=20823) | GBM +0.5889R (n=23640) | 净差 -0.1445 E_cost 真实 +0.3248 [MIN_N 通过]
+     ΔE z -5.20 p 1.000
+
+[阶段诊断] 1h trend_up 阶段段首 → long (hold, 期望差):
+  1h trend_up:early → long: 真实 +0.4888R (n=13251) | GBM +0.5976R (n=12726) | 净差 -0.1088 E_cost 真实 +0.3665 [MIN_N 通过]
+  1h trend_up:accelerate → long: 真实 +0.4208R (n=11939) | GBM +0.5759R (n=15487) | 净差 -0.1551 E_cost 真实 +0.3021 [MIN_N 通过]
+  1h trend_up:late → long: 真实 +0.4721R (n=17595) | GBM +0.6116R (n=23299) | 净差 -0.1395 E_cost 真实 +0.3539 [MIN_N 通过]
+
+[H2] 1h trend_down 段首 → short (只报净差, 不定门槛):
+  1h trend_down→short: 真实 +0.5177R (n=20519) | GBM +0.3869R (n=23698) | 净差 +0.1308 E_cost 真实 +0.3992 [MIN_N 通过]
+
+[H3] C_share 滚动集中度分层 (窗口 240, top5%|r| 顺趋势占比 ≥ 滚动中位数; 增量相对全体趋势段首):
+  1h trend_up→long 高集中度子集: 真实 +0.5104R (n=11382) | GBM +0.5540R (n=12961) | 净差 -0.0436 E_cost 真实 +0.3890 [MIN_N 通过]
+  1h trend_up→long 低集中度子集: 真实 +0.3773R (n=9324) | GBM +0.6258R (n=10568) | 净差 -0.2485 E_cost 真实 +0.2605 [MIN_N 通过]
+     H3 增量 (高集中度期望差 − 全体期望差): +0.1009 | GBM 同过滤增量: -0.0348
+
+[成本] 主端点 (1h trend_up→long hold): funding 按持仓时长 (taker 0.05%×2 + 滑点 1bp + funding 0.01%/8h):
+  真实 E[R] +0.4443 cost +0.1195 E_cost +0.3248 | GBM E_cost +0.4820 | 净差E_cost -0.1571
+
+[Holm] 5 格 (阶段 3 + 集中度 2) 期望差单侧 p + Holm 校正:
+  stage_trend_up:early: ΔE -0.1088 p 0.999 p_adj 1.000
+  stage_trend_up:accelerate: ΔE -0.1551 p 1.000 p_adj 1.000
+  stage_trend_up:late: ΔE -0.1395 p 1.000 p_adj 1.000
+  hi_conc: ΔE -0.0436 p 0.873 p_adj 1.000
+  lo_conc: ΔE -0.2485 p 1.000 p_adj 1.000
+  主端点 (trend_up→long): ΔE -0.1445 p 1.000
+
+[4h仅净差] (c17/c18: 4h 效应大部分=环境漂移, 不做门槛裁决):
+  4h trend_up→long: 真实 +0.3982R (n=4648) | GBM +0.6505R (n=5123) | 净差 -0.2523R
+  4h trend_down→short: 真实 +0.4910R (n=4656) | GBM +0.3677R (n=5096) | 净差 +0.1233R
+
+# BY_YEAR: 1h trend_up→long 2024 真实 +0.4430R (n=7539) GBM +0.5217R (n=8221) | 1h trend_up→long 2025 真实 +0.4140R (n=7118) GBM +0.6205R (n=8264) | 1h trend_up→long 2026 真实 +0.3975R (n=3677) GBM +0.6227R (n=4380)
+# HOLDOUT: 主端点 trend_up→long 2026-06..08: 真实 +0.2852R (n=866) GBM +0.5480R (n=1052) | 净差 -0.2628R (只报方向: 负/不可判)
