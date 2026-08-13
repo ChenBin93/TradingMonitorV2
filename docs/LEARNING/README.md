@@ -30,4 +30,4 @@
 - 书原文提取文本在 `/tmp/opencode/TSaM.txt`（gitignored 的 PDF 在 research/TSaM.pdf）
 
 ## 单元索引
-- 模块 0：`module0/unit01_noise_and_er.md`（噪声与效率比 ER）
+- 模块 0：`module0/unit01_noise_and_er.md`（噪声与效率比 ER，✅ 含 c30 考证结论）
