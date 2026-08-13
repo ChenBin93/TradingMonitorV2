@@ -18,3 +18,4 @@ docs/MULTIPLIER_*.md
 data/*.db-shm
 data/*.db-wal
 logs/*.out
+research/TSaM.pdf
