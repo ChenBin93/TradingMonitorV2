@@ -20,7 +20,7 @@ BASKET = {
     "EURUSD=X": "fx",
     "^TNX": "10y treasury yield",
 }
-FREQS = {"1d": "3y", "1h": "730d"}
+FREQS = {"1d": "max", "1h": "730d"}  # 日线取全历史（书口径需要长历史）；1h 受 yfinance 730d 限制
 
 
 def _fetch(ticker, freq, period):
