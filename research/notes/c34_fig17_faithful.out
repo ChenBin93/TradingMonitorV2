@@ -1,0 +1,44 @@
+# meta: study_id=c34_fig17_faithful date=2026-08-13 script_sha256=32372ecd30b46893e80288b905cf026fb50ee77859420d2b0393c67a9ec5cc9b data_range=2023-08..2026-08 日线 (书: 2000-2012) params=control=SPY+CL=F+GC=F+EURUSD=X+^TNX,er_n=20,ma_w=40,gbm_seeds=30,min_n=100,n_trades_min=10,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(全市场 avgER 中位数): 真实 0.235 | GBM 0.225 [PASS]; 探测器自检 MA 转向系统 golden [PASS]; GBM null 幅度 sanity (PF 中位数∈[0.5,1.5], avgER 中位数∈[0.05,0.6]) [PASS]; MIN_N=100(每市场 n_trades≥10 计入 PF) [PASS]
+# RESULTS: [学习级] c34 图 1.7 忠实复现 (书 CH1); x=avgER (20 日固定窗 全样本均值), y=PF=毛利润/毛亏损; 系统=40 日 MA 斜率转向 (非价格穿透), 永远在场多空反转无成本; 信号收盘确定次日收盘成交 close-to-close; 口径偏差: 书 2000-2012 期货+股指 vs 本 2023-08..2026-08 日线; 描述层无入场, 无交易含义
+
+[截面] 25 市场 (2023-08..2026-08 日线):
+  ADA/USDT:USDT (币) avgER=0.240 PF=1.434 n_trades=98 [计入]
+  ARB/USDT:USDT (币) avgER=0.250 PF=1.516 n_trades=49 [计入]
+  ATOM/USDT:USDT (币) avgER=0.232 PF=1.016 n_trades=69 [计入]
+  AVAX/USDT:USDT (币) avgER=0.243 PF=1.350 n_trades=76 [计入]
+  BCH/USDT:USDT (币) avgER=0.210 PF=0.949 n_trades=92 [计入]
+  BNB/USDT:USDT (币) avgER=0.217 PF=1.360 n_trades=92 [计入]
+  BTC/USDT:USDT (币) avgER=0.243 PF=1.477 n_trades=80 [计入]
+  DOGE/USDT:USDT (币) avgER=0.241 PF=1.504 n_trades=83 [计入]
+  DOT/USDT:USDT (币) avgER=0.244 PF=1.007 n_trades=67 [计入]
+  ETH/USDT:USDT (币) avgER=0.246 PF=1.121 n_trades=70 [计入]
+  INJ/USDT:USDT (币) avgER=0.208 PF=0.708 n_trades=74 [计入]
+  LINK/USDT:USDT (币) avgER=0.219 PF=1.141 n_trades=82 [计入]
+  LTC/USDT:USDT (币) avgER=0.198 PF=0.731 n_trades=88 [计入]
+  NEAR/USDT:USDT (币) avgER=0.244 PF=0.843 n_trades=79 [计入]
+  OP/USDT:USDT (币) avgER=0.224 PF=1.122 n_trades=71 [计入]
+  SOL/USDT:USDT (币) avgER=0.240 PF=1.350 n_trades=76 [计入]
+  SUI/USDT:USDT (币) avgER=0.235 PF=4.603 n_trades=61 [计入]
+  TIA/USDT:USDT (币) avgER=0.224 PF=0.608 n_trades=84 [计入]
+  UNI/USDT:USDT (币) avgER=0.236 PF=2.429 n_trades=50 [计入]
+  XRP/USDT:USDT (币) avgER=0.216 PF=1.480 n_trades=89 [计入]
+  SPY (美股) avgER=0.250 PF=1.321 n_trades=35 [计入]
+  CL=F (传统对照) avgER=0.201 PF=1.140 n_trades=38 [计入]
+  GC=F (金属) avgER=0.235 PF=2.343 n_trades=49 [计入]
+  EURUSD=X (传统对照) avgER=0.223 PF=0.907 n_trades=57 [计入]
+  ^TNX (传统对照) avgER=0.205 PF=0.908 n_trades=49 [计入]
+  分组名单: 币=ADA/USDT:USDT,ARB/USDT:USDT,ATOM/USDT:USDT,AVAX/USDT:USDT,BCH/USDT:USDT,BNB/USDT:USDT,BTC/USDT:USDT,DOGE/USDT:USDT,DOT/USDT:USDT,ETH/USDT:USDT,INJ/USDT:USDT,LINK/USDT:USDT,LTC/USDT:USDT,NEAR/USDT:USDT,OP/USDT:USDT,SOL/USDT:USDT,SUI/USDT:USDT,TIA/USDT:USDT,UNI/USDT:USDT,XRP/USDT:USDT | 美股=SPY | 传统对照=CL=F,EURUSD=X,^TNX | 金属=GC=F
+
+[H1] ER–PF Spearman ρ (计入市场 n=25): ρ = 0.367 -> FAIL (判据 ρ<0 且 |ρ|≥0.3)
+  (预注册符号矛盾说明: 书逻辑'低噪声→高PF'对应 ρ>0; 若实测 ρ>0 且 |ρ|≥0.3, 书方向成立但预注册字面判据 FAIL — 结论裁决)
+
+[H2] 分组 PF 中位数: 币=1.246 | 美股=1.321 | 传统对照=0.908 | 金属=2.343
+  美股组 PF 中位数 < 其余组 -> FAIL
+
+[H3] GBM 同管线 (30 种子/市场, 同 MA 系统): ρ_GBM = -0.073 -> PASS (判据 |ρ|<0.3)
+  GBM PF 分布 (750 样本): median=1.150 5-95%=[0.56, 2.28] (判据 集中近 1)
+  GBM 散点 |ρ| 与 PF 范围 -> PASS
+
+[对照-书] 书参考值: x∈[0.204, 0.266], y∈[0.2, 3.7]; 本复现: x∈[0.198, 0.250], y∈[0.608, 4.603]
+[对照-书] 书图题写 information ratio、正文写 PF (自相矛盾) — 本研究取 PF 并标注; 书 2000-2012 日线期货+股指 vs 本 2023-08..2026-08 日线 (币+传统)
