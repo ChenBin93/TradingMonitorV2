@@ -1,0 +1,22 @@
+# meta: study_id=c12_vol_memory date=2026-08-13 script_sha256=a4bd6f35e1dc9f0693e410779bc1c75c505e037c93b87e628cea5137a89c720c data_range=2023-08..2026-08 params=tf=1h,4h,warmup=600,z_window=120,acf_lag=168,dfa_min_scale=16,gbm_seeds=30 gate=MIN_GBM_SEEDS=30,MIN_N=200(描述层不适用)
+# GATE: gbm_seeds=30 口径: 描述层无入场, 1:1 WR 不适用; 无条件基线=DFA-H(logTR/c): 真实1h中位 0.931 vs GBM30种子mean 0.497 [PASS]; 白噪声探测器 0.506 [PASS]; MIN_N 描述层不适用 (样本bars见RESULTS)
+# RESULTS: 20 标的 × 1h/4h × 2023-08..2026-08; 描述层无入场, 无交易含义
+
+[H1] DFA-H(log TR/close) 各标的聚合 (中位数口径):
+  1h: H med=0.931 [min 0.874, max 0.981] (n_sym=20)
+  4h: H med=0.896 [min 0.798, max 0.946] (n_sym=20)
+[H1-x] DFA-H(|log-ret|) 交叉验证 (a15 旧口径替代): 1h med=0.814 | 4h med=0.731
+[H1-null] GBM(logTR/c) 30种子 (gbm_matching 首标参考, 同管线): 1h mean=0.497 [min 0.471, max 0.523]
+  4h mean=0.494 [min 0.448, max 0.544]
+
+[H2] log(ATR/close) ACF@168 (1h): med=0.489 mean=0.477 达标(≥0.5)标的 7/20 [min 0.345, max 0.565]
+[H2-null] GBM(logATR/c) ACF@168 5种子: mean=-0.0093 (ewm核 0.93^168≈0)
+[H2-surr] permutation 置换 surrogate ACF@168 (5 置换/标的): med=0.0002 mean=0.0000
+
+[H3] z120 三分位直接转移率 (n 合计): 1h 低→高=0.0011 高→低=0.0000 (n=501937) | 4h 低→高=0.0017 高→低=0.0000 (n=116282)
+[H4] z120 状态持续 (mean 根): 1h 低=16.3 高=13.5 | 4h 低=15.2 高=12.9
+[H4-med] z120 状态持续 (median 根): 1h 低=6.0 高=6.0 | 4h 低=6.0 高=4.0
+[对照-历史] a2(旧, 已作废) vol120 z-score 口径: 1h 低持续20根/高15根, 低→高直接0.002 (仅形状参照, 不作证据)
+[设计偏离-标定] 绝对口径标定 (运行前, 证据): 绝对log(TR)对纯GBM ACF@1=0.96 DFA-H=1.40; ewm(白噪声) H=0.83; GBM log(ATR/close) H=0.84 — GBM null≈0.5 不可达, 故 H1 用 log(TR/close), H2 用 log(ATR/close) (详见 docstring 设计偏离说明)
+
+# BY_YEAR: 1h 2024 H=0.930 ACF168=0.397 (n_sym=20) | 1h 2025 H=0.898 ACF168=0.365 (n_sym=20) | 1h 2026 H=0.883 ACF168=0.413 (n_sym=20) | 4h 2024 H=0.886 ACF168=0.140 (n_sym=20) | 4h 2025 H=0.827 ACF168=0.204 (n_sym=20) | 4h 2026 H=0.847 ACF168=0.066 (n_sym=20)
