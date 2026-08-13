@@ -1,0 +1,24 @@
+# meta: study_id=c31_run_fat_tail date=2026-08-13 script_sha256=c10b1b7a6f96e30d0842bf6716c3d9f04d60b8426c66f7cc7ab307aeb2c0f882 data_range=2023-08..2026-08 (加密) / 对照以 control.db 为准 params=crypto=BTC/USDT:USDT+ETH/USDT:USDT,control=SPY+GC=F+EURUSD=X,k_main=8,gap_mult=2.0,min_n=100,gbm_seeds=30 gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(BTC 1h P(run≥8) 每bar频率): 真实 1.68% GBM 3.45% [PASS]; 探测器自检 run状态机 golden 对拍 [PASS]; GBM30种子同管线 null (P8 种子散布 σ=0.0029) [PASS]; MIN_N n_bars=26269 各格样本 [PASS]
+# RESULTS: [学习级] 考证 U0-2 (书 CH1/CH8: 运行序列肥尾=趋势利润唯一来源); 加密 BTC/ETH 1h/4h + 传统 SPY/GC=F/EURUSD=X 1h; run=收盘价连续同号 bar, 符号0断且不计, gap(>2×标准间隔)断; P(run≥k)=每bar频率 (最终长度事后归属); 描述层无入场, 无交易含义
+
+[H1] 加密 run 肥尾 (BTC/ETH 1h/4h, 主判据 k=8):
+  BTC/USDT:USDT:1h: P5=0.132 P8=0.017 P10=0.006 (n_ge8=441) | GBM P8 0.035 σ 0.0029 | z8=-6.05 [MIN_N 通过]
+  BTC/USDT:USDT:4h: P5=0.131 P8=0.017 P10=0.005 (n_ge8=112) | GBM P8 0.036 σ 0.0045 | z8=-4.18 [MIN_N 通过]
+  ETH/USDT:USDT:1h: P5=0.141 P8=0.017 P10=0.005 (n_ge8=443) | GBM P8 0.035 σ 0.0029 | z8=-6.02 [MIN_N 通过]
+  ETH/USDT:USDT:4h: P5=0.165 P8=0.028 P10=0.005 (n_ge8=186) | GBM P8 0.036 σ 0.0045 | z8=-1.67 [MIN_N 通过]
+  加密合并 (65672 bars): P8=0.018 | null 0.035 (σ 0.0018) | z8=-9.45
+  H1 判据: z8>2 -> FAIL (k=5 z=-11.39, k=10 z=-3.91)
+
+[H2] 传统市场 run 肥尾 (1h, 主判据 k=8):
+  SPY: P5=0.118 P8=0.000 P10=0.000 (n_ge8=0) | GBM P8 0.000 σ 0.0000 | z8=+0.00 [MIN_N 不足]
+  GC=F: P5=0.174 P8=0.032 P10=0.010 (n_ge8=432) | GBM P8 0.032 σ 0.0033 | z8=-0.25 [MIN_N 通过]
+  EURUSD=X: P5=0.109 P8=0.013 P10=0.001 (n_ge8=202) | GBM P8 0.033 σ 0.0031 | z8=-6.31 [MIN_N 通过]
+  传统合并 (34412 bars): P8=0.018 | null 0.028 (σ 0.0019) | z8=-4.84
+  H2 判据: z8>2 -> FAIL (k=5 z=-6.63, k=10 z=-2.86)
+
+[H3] 加密 vs 传统 (k=8): 加密合并 P8=0.018 | 传统合并 P8=0.018 | 差 -0.000 | 合并σ 0.0026 (2σ 0.0052)
+  H3 判据: 差 > 合并2σ -> FAIL
+  (k=5 差 +0.003, k=10 差 +0.001)
+
+[对照-历史] c18 (2026-08-13): 4h 方向主要由无条件漂移贡献; c12 (2026-08-13): 波动长记忆 DFA-H 0.93/0.90; 书 CH1/CH8: 运行序列肥尾=趋势系统利润唯一来源 (本书语境=传统市场)

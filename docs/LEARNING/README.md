@@ -25,8 +25,8 @@
 
 ## 规则
 - 考证研究编号沿用 C 系列（c30、c31…）
-- **两档制**（详见 research/PLAN.md 学习级考证节）：跟书学习用**学习级**（BTC/ETH + 传统对照篮、GBM 10 种子、无分年、MIN_N=100、结论标 `[学习级]`、不作交易依据）；有交易含义才升级**研究级**（20 标的 × 30 种子 × BY_YEAR）
-- 铁律两档不松：GBM 零假设对照 + 无未来函数 + docstring 预注册 + GATE + check_study
+- **两档制**（详见 research/PLAN.md 学习级考证节）：跟书学习用**学习级**（BTC/ETH + 传统对照篮、GBM 30 种子、无分年、MIN_N=100、**跳过 pytest/check_study 两道门禁**、结论标 `[学习级]`、不作交易依据）；有交易含义才升级**研究级**（20 标的 × BY_YEAR + 两道门禁全绿）
+- 两档都不松的底线：GBM 零假设对照（脚本内置 GATE）+ 无未来函数纪律（causal 库/掩码/禁切片，自我约束）+ docstring 预注册 + .out 数字引用
 - **传统市场对照篮**：data/control.db（SPY/CL=F/GC=F/EURUSD=X/^TNX × 1d/1h，control_data.py 下载）。书结论先在传统市场验证成立，加密证伪才有"加密特殊性"语义
 - 学习单元讲解存放在 `docs/LEARNING/moduleN/`
 - 每个单元的"修正理解"在考证完成后回写该单元文件
@@ -34,3 +34,4 @@
 
 ## 单元索引
 - 模块 0：`module0/unit01_noise_and_er.md`（噪声与效率比 ER，✅ 含 c30 考证结论）
+- 模块 0：`module0/unit02_run_fat_tail.md`（随机游走与运行肥尾，✅ 含 c31 考证结论）
