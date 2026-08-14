@@ -1,0 +1,28 @@
+# meta: study_id=c41_donchian date=2026-08-14 script_sha256=ab654e58986001e0209896c9574718e012221c310d80ac2fcdfcb652816b187f data_range=2023-08..2026-08 params=crypto=BTC/USDT:USDT+ETH/USDT:USDT,tfs=4h,1h,Ns=10~100,step=10,calibers=AB,N_I=20,gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(全网格净盈利 N 占比 GBM): 0.438 [PASS]; 探测器自检 Donchian golden [PASS]; GBM 平均净盈亏 -0.145 [PASS]; MIN_N n≥100 (每格交易数≥10 计入) [PASS]
+# RESULTS: [学习级] c41 N 日突破/Donchian 忠实复现 (书 CH5 p.222-226 + CH8 p.337-338); A=当日高低 vs 前 N 日, B=窗口止于 t−1 + close 确认; 永远在场反转无成本; N 10~100 日步长 10; GBM 30 种子同网格; 描述层无入场, 无交易含义
+
+[扫描] 每 (标的, tf, 口径): 净盈利 N 占比 | 最优 N | 前后半 最优 N | maxDD(N 最小→最大):
+  BTC/USDT:USDT 4h A: 占比 70.0% (GBM 43.8%±27.5%) 未超 | 最优 N=10 前半=60 后半=10 漂移=5格 | maxDD 0.7533→0.6319
+  BTC/USDT:USDT 4h B: 占比 30.0% (GBM 43.8%±27.5%) 未超 | 最优 N=10 前半=10 后半=10 漂移=0格 | maxDD 0.7222→0.8703
+  BTC/USDT:USDT 1h A: 占比 100.0% (GBM 41.5%±26.4%) 超2σ↑ | 最优 N=10 前半=60 后半=10 漂移=5格 | maxDD 0.6294→0.6323
+  BTC/USDT:USDT 1h B: 占比 80.0% (GBM 41.5%±26.4%) 未超 | 最优 N=10 前半=60 后半=10 漂移=5格 | maxDD 0.7296→0.8468
+  ETH/USDT:USDT 4h A: 占比 90.0% (GBM 43.5%±27.9%) 未超 | 最优 N=40 前半=60 后半=30 漂移=3格 | maxDD 1.3588→1.4375
+  ETH/USDT:USDT 4h B: 占比 80.0% (GBM 43.5%±27.9%) 未超 | 最优 N=20 前半=20 后半=30 漂移=1格 | maxDD 0.9838→1.9844
+  ETH/USDT:USDT 1h A: 占比 100.0% (GBM 41.5%±26.3%) 超2σ↑ | 最优 N=60 前半=60 后半=20 漂移=4格 | maxDD 1.3529→1.5120
+  ETH/USDT:USDT 1h B: 占比 90.0% (GBM 41.5%±26.3%) 未超 | 最优 N=50 前半=50 后半=40 漂移=1格 | maxDD 1.4308→1.9294
+  H1 判据: 净盈利占比 > GBM mean+2σ -> 2/8
+
+[H2] 最优 N 前后半漂移 ≥ 2 格 -> 5/8
+
+[H3] maxDD(N=10) → maxDD(N=100) 递增 (书风险随 N 增):
+  maxDD(100) > maxDD(10) -> 7/8
+
+[H4] 自适应 N vs 固定最优 N (caliber A):
+  BTC/USDT:USDT 4h: 自适应 -0.1085 | 固定最优 +0.7104 -> <✗
+  BTC/USDT:USDT 1h: 自适应 +0.7335 | 固定最优 +0.9369 -> <✗
+  ETH/USDT:USDT 4h: 自适应 -0.5699 | 固定最优 +1.4735 -> <✗
+  ETH/USDT:USDT 1h: 自适应 +1.0351 | 固定最优 +1.7362 -> <✗
+  H4 判据: 自适应 ≥ 固定最优 -> 0/4
+
+[对照-历史] 书 CH5 p.222-226 (原油 1991-2010 N 扫描仅一笔亏损); CH8 p.337-338 (正式口径); c40 (swing 事件驱动 1:1 无优势); c34 (MA 系统 PF 随 ER); c21 (区间触碰 1:1 无 ΔE)
