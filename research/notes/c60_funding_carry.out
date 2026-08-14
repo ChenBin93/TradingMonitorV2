@@ -1,0 +1,36 @@
+# meta: study_id=c60_funding_carry date=2026-08-14 script_sha256=8ebe0176ab033e5a6333bf0838172b2e12041977637dcdd42666fa870be7d0ea data_range=funding 2026-05-11..08-14 (3 个月, API 上限); 永续止 2026-08-01 params=settles_year=1095,cost=40bp,spot_api=OKX,window=2026-05-11~2026-08-14,null=30,min_n=100,gate=MIN_N=100(学习级),学习级
+# GATE: 年化 golden + basis golden + 符号 null sanity [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c60 公开策略验证①: 加密 funding carry 可行性核算; funding=8h 结算 withRate, 年化=mean×1095; basis=永续−现货价差, short-perp+long-spot 收敛损益=(b入−b出)/spot; 成本 0.4% 往返; 3 个月窗口 (OKX API 上限) 标注; 描述层无入场, 无交易含义
+
+[H1] funding 年化 carry (mean×1095, 符号随机化 null 30 次):
+  ADA: mean +0.000020 | 年化 +2.16% (n=284)
+  ARB: mean +0.000023 | 年化 +2.47% (n=284)
+  ATOM: mean -0.000040 | 年化 -4.43% (n=285)
+  AVAX: mean +0.000013 | 年化 +1.37% (n=284)
+  BCH: mean -0.000027 | 年化 -2.97% (n=285)
+  BNB: mean +0.000038 | 年化 +4.14% (n=285)
+  BTC: mean +0.000034 | 年化 +3.77% (n=284)
+  DOGE: mean +0.000046 | 年化 +5.03% (n=285)
+  DOT: mean +0.000034 | 年化 +3.71% (n=285)
+  ETH: mean +0.000023 | 年化 +2.55% (n=284)
+  INJ: mean -0.000045 | 年化 -4.94% (n=284)
+  LINK: mean +0.000039 | 年化 +4.26% (n=285)
+  LTC: mean +0.000036 | 年化 +3.92% (n=284)
+  NEAR: mean +0.000057 | 年化 +6.24% (n=285)
+  OP: mean +0.000030 | 年化 +3.29% (n=284)
+  SOL: mean +0.000009 | 年化 +1.01% (n=285)
+  SUI: mean +0.000044 | 年化 +4.82% (n=285)
+  TIA: mean +0.000004 | 年化 +0.38% (n=569)
+  UNI: mean +0.000046 | 年化 +5.00% (n=284)
+  XRP: mean +0.000013 | 年化 +1.41% (n=284)
+  20 标的平均年化 +2.16% vs 符号 null 95% [-1.03%, +1.11%] -> 显著↑
+
+[H2] 扣 basis 漂移后净 carry (BTC/ETH, 窗口 2026-05-11..08-01, short-perp+long-spot):
+  BTC: b入 -18.10 b出 -47.30 | basis P&L +0.04%/窗 (+0.16%/年) | funding 收集 +0.78% (窗) | 净 (年化) +3.62% 为正
+  ETH: b入 -0.69 b出 -1.38 | basis P&L +0.03%/窗 (+0.13%/年) | funding 收集 +0.53% (窗) | 净 (年化) +2.49% 为正
+
+[H3] 成本敏感性 (往返 0.4% = 现货+永续开平各 0.1%):
+  BTC: 净 carry(不含成本) +3.62%/年 | 成本 +1.77%/年 | 含成本 +1.85%/年 为正
+  ETH: 净 carry(不含成本) +2.49%/年 | 成本 +1.77%/年 | 含成本 +0.72%/年 为正
+
+[对照-历史] He 2022 (加密 funding carry 高夏普, 2022 后压缩); c49 (funding-方向/折返无调节 — 时序无效但水平 carry 可能 存在); 本砖: 3 个月窗口 (API 上限) 的可行性核算; 数据摩擦: backtest 永续止 08-01, funding 至 08-14 (basis 窗口截断)

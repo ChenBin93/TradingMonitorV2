@@ -1,0 +1,16 @@
+# meta: study_id=c61_tsmom date=2026-08-14 script_sha256=e2b9fd65705edb32d61fdb90fe0f45ced2e1b4629175dc82886a16b9cef493bd data_range=control.db 1962-2026; backtest 3y params=sig=12m,vol=60d,split=2011,gbm_seeds=30(漂移匹配),min_n=100,gate=MIN_N=100(学习级),学习级
+# GATE: MOP golden + 漂移匹配 null sanity [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c61 公开策略验证②: 传统 TSMOM (MOP 2012); sign(12m) 月未信号 → 下月执行; vol targeting 60 日 sd 倒数等权; GBM null 漂移匹配 (去序列相关保留漂移/波动); 描述层无入场, 无交易含义
+
+[H1] 传统市场 TSMOM 组合 (SPY/CL/GC/EURUSD/TNX) 毛 SR vs 漂移匹配 GBM null 30 种子:
+  真实 SR +0.202 (n=763) [MIN_N 通过] | null SR +0.045±0.006 | 超额 +0.157 (z=+26.74) -> 超2σ↑
+
+[H2] 分年代稳定性 (衰减检验, 真实 vs 同段 null):
+  ≤2010: 真实 SR +0.204 (n=575) | null SR +0.049±0.009 | 超额 +0.155 超2σ↑
+  2011-2026: 真实 SR +0.242 (n=188) | null SR +0.039±0.015 | 超额 +0.203 超2σ↑
+
+[H3] 加密 BTC/ETH 日线同管线对照:
+  加密组合 SR +0.167 (n=24) [MIN_N 不足] | null SR +0.108±0.144 | 超额 +0.059 (z=+0.41) -> 未超
+  传统 vs 加密: 超额 +0.157 vs +0.059 (正反对照)
+
+[对照-历史] MOP 2012 JF (58 期货全盈利毛 SR≈0.8); Hurst 2017 (百年证据); 加密方向证伪 (c31 反持久/c41 突破负); 本砖: 传统市场毛 SR vs 漂移匹配 null — 若成立则是百年证据的 现代复现, 与加密方向构成正反对照
