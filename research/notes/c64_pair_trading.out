@@ -1,0 +1,14 @@
+# meta: study_id=c64_pair_trading date=2026-08-14 script_sha256=a0217fd22f968d9b3e739317905f7aa40d5c644ee095552547c0613ac8a51a2f data_range=2023-08..2026-08 params=form=60d,n_pairs=20,z=2.0±,gbm_seeds=30(漂移匹配),min_n=100,gate=MIN_N=100(学习级),学习级
+# GATE: 选择 golden + z/交易 golden + null sanity [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c64 公开策略验证⑤: 配对/协整交易 (crypto); 60 日形成期 top-20 相关对, 价差 z |z|>2 开 回 0 平, dollar-neutral 逐对; GBM null 漂移匹配 30 种子 (GBM 无协整 — null 检验交易逻辑); n_eff 警示降级; 描述层无入场, 无交易含义
+
+[横截面警示] n_eff = 2.09 (c37 口径, c37 报 2.15) — top 对受相关结构限制, 结论按 n_eff 降级
+
+[H1] 配对交易单笔 P&L (log 收益) vs GBM null 30 种子:
+  真实: 单笔均值 -0.0026 | 总净 -1.083 | n_trades 421 [MIN_N 通过]
+  null: 单笔均值 +0.0266±0.0012 | 超额 -0.0291 (z=-24.17) -> 未超
+
+[H2] 分年稳定性 (总净, log):
+  2024 +0.800 | 2025 -2.620 | 2026 +0.737
+
+[对照-历史] Gatev 2006 (年化 11%); Do-Faff 2010 (利润减半); c37 (n_eff=2.15); 本砖: crypto 配对交易残值 vs 漂移匹配 GBM null (无协整)
