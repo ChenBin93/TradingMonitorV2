@@ -1,0 +1,19 @@
+# meta: study_id=c51_price_distribution date=2026-08-14 script_sha256=8f9815f1400aab92b10b4ed2c96387488b10571d71e628f7feff050fa1ac834e data_range=2023-08..2026-08 params=tf=4h,band_n=20,band_k=2.0,K=24,gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: 探测器自检 H1 带 golden + 块 bootstrap sanity [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c51 M7 U1 价格分布系统忠实复现 (书 CH18 p.801-832); 带=MA20±2σ (价格 sd); 触碰双用途 (顺势/逆势); E1 (c15); 带收窄→释放 (块 bootstrap 波动聚集 null); 直方图位 vs c14 关键位; GBM 首标×30 种子; 描述层无入场, 无交易含义
+
+[H1] 带触碰 D1 (顺势/逆势 1:1) + K 留存 vs GBM:
+  4h 顺势: 53.4% (n=10509) [MIN_N 通过] | GBM 49.6%±2.4%
+  4h 逆势: 46.6% (n=10509) [MIN_N 通过] | GBM 50.4%±2.4%
+  4h 留存: 53.6% (n=10646) [MIN_N 通过] | GBM 53.8%±4.0%
+
+[H2] 带触碰后波动释放 E1 (c15 口径):
+  4h: 真实 +14.46% (n=10654) | GBM +3.25%±+0.67%
+
+[H3] 带收窄→释放 (窄带后 K 波动 vs 块 bootstrap null):
+  4h: 真实 +0.013436 (n=9200) | bootstrap +0.013760±+0.001164 | 超额 -0.000323 未超
+
+[H4] 直方图分布位 vs cluster_levels (逆势触碰 D1):
+  4h: 直方图位 47.8% (n=3427) | cluster 49.6% (n=69875) | GBM 47.7%±3.9%
+
+[对照-历史] c14 (关键位围墙); c15 (触碰释放 +7.44pp); c17 (触碰折返 -4.09pp); c23 (1:1 无优势); 书 CH18 p.801-832 (价格分布, 双用途不给结论, 零系统回测)
