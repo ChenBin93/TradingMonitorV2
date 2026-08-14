@@ -1,0 +1,16 @@
+# meta: study_id=c55_dual_timeframe date=2026-08-14 script_sha256=ab932aac2d00ada25241ac89b8a37011b821d2a1ec3c7a324889b8507931d5e7 data_range=2023-08..2026-08 params=ma_w=360,stoch_w=18,thresh=0.3,h2_windows=(72, 36, 18),gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: 探测器自检 golden (转向+回撤时序) [PASS]; null gain 带 [PASS]; 即时系统恒在仓 [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c55 M8 双框架择时 (书 CH19 p.833-843, $6200 单例 n=1 无 null); 慢趋势=MA(360) 方向转向, 择时=3日 raw stochastic %K<30 回撤入场 vs 即时入场; 描述层无入场, 无交易含义
+
+[H1] 双框架择时 (4h, MA(360) + %K(18) 回撤入场):
+  BTC: 即时 +0.4635 | 择时 +0.0944 | gain -0.3691 | null gain -0.0262±0.2988 | 择时增益 -0.3430 (z=-1.15) 未超 | 入场 n=58 [MIN_N 不足]
+  ETH: 即时 +2.2469 | 择时 +1.4638 | gain -0.7831 | null gain -0.0354±0.4107 | 择时增益 -0.7477 (z=-1.82) 未超 | 入场 n=39 [MIN_N 不足]
+  H1 判据: 择时增益 > 2σ -> 0/2
+
+[H2] 周期比对拍 (趋势 360bar, 振荡器窗口/ratio 工程对拍, 无 null):
+  stoch_w= 72 (ratio 0.200): BTC -0.2146 | ETH -1.0621
+  stoch_w= 36 (ratio 0.100): BTC -0.0672 | ETH -1.3130
+  stoch_w= 18 (ratio 0.050): BTC -0.3691 | ETH -0.7831
+  书 5/23≈0.2 → 最接近 72bar 档 (ratio 0.2)
+
+[对照-历史] 书 CH19 p.833-843 (60日 MA + 3日随机, $2075 → $6200 单例 n=1 无 null); c19 (回撤恢复 −15.4pp, dip-buy 无 优势); c29 (时间视角两条证伪); c41 (突破/趋势系统无成本 whipsaw 负漂移)
