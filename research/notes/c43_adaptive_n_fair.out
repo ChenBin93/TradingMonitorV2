@@ -1,0 +1,32 @@
+# meta: study_id=c43_adaptive_n_fair date=2026-08-14 script_sha256=fc81582cb60325b6d9a8a52f0e80cb3865b48dc0486b59519e119f633bc8d470 data_range=2023-08..2026-08 params=crypto=BTC/USDT:USDT+ETH/USDT:USDT,tfs=4h,1h,Ns=10~100,N_I=20,N20=20,gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(GBM 自适应全样本净): 0.046 [PASS]; 探测器自检 Donchian golden [PASS]; GBM null sanity (自适应 0.046 / N20 -0.283 ∈ [-2.5, 0.5]) [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c43 自适应 N 事前基准对比 (c41 H4 不可知论修正); CH5 口径 A; 走前法 (前半选 N → 后半比) + N=20 零优化 + GBM null 净差; 自适应 N_t=N_I×V_n/V_c (因果); 描述层无入场, 无交易含义
+
+[走前法] 每 (标的, tf): 前半最优 N | 后半: 事前固定N vs 自适应:
+  BTC/USDT:USDT 4h: 前半最优 N=60 | 后半 固定N +0.0820 vs 自适应 -0.1254 -> 固定N≥✗
+  BTC/USDT:USDT 1h: 前半最优 N=60 | 后半 固定N +0.0531 vs 自适应 +0.4851 -> 自适应≥✓
+  ETH/USDT:USDT 4h: 前半最优 N=60 | 后半 固定N +0.7062 vs 自适应 +0.0123 -> 固定N≥✗
+  ETH/USDT:USDT 1h: 前半最优 N=60 | 后半 固定N +1.0067 vs 自适应 +1.3820 -> 自适应≥✓
+  H1 判据: 后半自适应 ≥ 事前固定 N -> 2/4
+
+[H2] N=20 日固定 (零优化) vs 自适应 (全样本):
+  BTC/USDT:USDT 4h: N20 -0.0287 | 自适应 -0.1085 -> N20≥✗
+  BTC/USDT:USDT 1h: N20 +0.1832 | 自适应 +0.7335 -> 自适应≥✓
+  ETH/USDT:USDT 4h: N20 +1.3104 | 自适应 -0.5699 -> N20≥✗
+  ETH/USDT:USDT 1h: N20 +1.4658 | 自适应 +1.0351 -> N20≥✗
+  H2 判据: 自适应 ≥ N20 -> 1/4
+
+[H3] GBM null 净差超额 (海龟汤修正):
+  BTC/USDT:USDT 4h: 自适应超额 -0.1544 | N20 超额 +0.2544 -> N20≥✗
+  BTC/USDT:USDT 1h: 自适应超额 +0.5239 | N20 超额 +0.3388 -> 自适应≥✓
+  ETH/USDT:USDT 4h: 自适应超额 -0.6331 | N20 超额 +1.7023 -> N20≥✗
+  ETH/USDT:USDT 1h: 自适应超额 +0.7481 | N20 超额 +1.6779 -> N20≥✗
+  H3 判据: 自适应超额 ≥ N20 超额 (full) -> 1/4
+
+[H3-wf] 走前法 null 超额 (后半):
+  BTC/USDT:USDT 4h: 自适应超额 -0.2105 | 走前固定N 超额 +0.1372
+  BTC/USDT:USDT 1h: 自适应超额 +0.4350 | 走前固定N 超额 +0.3584
+  ETH/USDT:USDT 4h: 自适应超额 -0.1043 | 走前固定N 超额 +0.8605
+  ETH/USDT:USDT 1h: 自适应超额 +1.3130 | 走前固定N 超额 +1.4055
+
+[对照-历史] c41 H4 (事后最优基准: 自适应 0/4 未达 — 不可知论违规); 书 CH21 (测试不用于发现); 书 CH5 (Donchian 4 周默认); Seidel & Ginsberg 1983 (自适应 N)
