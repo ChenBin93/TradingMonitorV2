@@ -1,0 +1,15 @@
+# meta: study_id=c63_month_end_effect date=2026-08-14 script_sha256=db8f7fc118f4083c83992a95deaa40074d2f49dbc3c1bb333b8cb1e71cf90fb3 data_range=control.db 1993-2026; backtest 3y params=end_days=2,perm=30,min_n=100,gate=MIN_N=100(学习级),学习级
+# GATE: 月末掩码 golden + 置换 sanity [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c63 公开策略验证④: 月末效应 (MPQ 2000); 月末 2 日均收益 − 其余日均收益 (close-to-close); 置换 null 30 次 (逐标的内打乱掩码); 传统 (SPY/GC/EURUSD) + 加密 (BTC/ETH, UTC 日历) 对照; 描述层无入场, 无交易含义
+
+[H1] 传统市场 月末 2 日均收益 vs 其余日均收益:
+  SPY: 差 -0.0106% (月末 n=804 其余 n=7637)
+  GC=F: 差 -0.0263% (月末 n=623 其余 n=5888)
+  EURUSD=X: 差 +0.0262% (月末 n=544 其余 n=5345)
+  pooled 差 -0.0035% vs 置换 95% [-0.0510%, +0.0422%] -> 区间内
+[H2] 加密 (UTC 24/7) 月末 2 日均收益 vs 其余日均收益:
+  BTC/USDT:USDT: 差 -0.4047% (月末 n=72 其余 n=1023)
+  ETH/USDT:USDT: 差 -0.5123% (月末 n=72 其余 n=1023)
+  pooled 差 -0.4585% vs 置换 95% [-0.5550%, +0.2770%] -> 区间内
+
+[对照-历史] MPQ 2000 (美股月末 2 日占月收益大头); 本砖: SPY 代理 SP500 (非指数), GC/EURUSD 商品/外汇; 加密 24/7 无日历锚对照; 置换 null 30 次
