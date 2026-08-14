@@ -1,0 +1,27 @@
+# meta: study_id=c45_ch6_empirical date=2026-08-14 script_sha256=652068595ede374e1cf791900aaf9a36263aa298b1d2066aa0f80de0fefaf61d data_range=GC=F/SPY max 历史 + BTC/ETH 2023-08..2026-08 params=control=GC=F+SPY,crypto=BTC/USDT:USDT+ETH/USDT:USDT,h1_lags=15,h2_n=20,h2_ks=(1, 2, 3, 5),h3_n=20,h3_os=5,gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(GBM 悖论占比): 0.508 [PASS]; 探测器自检 回归 golden [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c45 CH6 剩余实证断言打包 (U1-3 收尾); H1 correlogram lag1-15 vs GBM 95% (书图 6.13); H2 20bar 回归 1/2/3/5 步 MAE (书图 7.1); H3 拟合-预报悖论 (书 p.257); GBM 30 种子同管线; 描述层无入场, 无交易含义
+
+[H1] GC=F 日收益 correlogram lag1-15 (GBM 95% 区间):
+  GC=F: ρ1/2/3/5/10/15 = [-0.015, -0.015, +0.017, +0.010, +0.007, +0.012] | 15 滞后全部在区间: ✗
+  (BTC/ETH 日线交叉):
+  BTC/USDT:USDT: 区间内 12/15 (ρ1=-0.052)
+  ETH/USDT:USDT: 区间内 15/15 (ρ1=-0.014)
+  H1 判据: GC=F 15 滞后全在 GBM 区间 -> FAIL
+
+[H2] 20bar 滚动回归 1/2/3/5 步前瞻 MAE (书图 7.1):
+  GC=F: MAE1=20.9796 MAE2=24.8968 MAE3=28.6144 MAE5=35.6116 单调✓ | MAE2/MAE1 1.187 (GBM 1.182±0.004) MAE3/MAE1 1.364 (GBM 1.353±0.008) MAE5/MAE1 1.697 (GBM 1.674±0.021)
+  SPY: MAE1=2.7037 MAE2=3.1830 MAE3=3.6253 MAE5=4.4622 单调✓ | MAE2/MAE1 1.177 (GBM 1.183±0.003) MAE3/MAE1 1.341 (GBM 1.354±0.007) MAE5/MAE1 1.650 (GBM 1.676±0.019)
+  BTC/USDT:USDT: MAE1=2370.3089 MAE2=2821.1140 MAE3=3244.3104 MAE5=4052.3143 单调✓ | MAE2/MAE1 1.190 (GBM 1.182±0.008) MAE3/MAE1 1.369 (GBM 1.354±0.019) MAE5/MAE1 1.710 (GBM 1.676±0.046)
+  ETH/USDT:USDT: MAE1=130.5190 MAE2=155.2060 MAE3=178.2884 MAE5=222.9136 单调✓ | MAE2/MAE1 1.189 (GBM 1.182±0.008) MAE3/MAE1 1.366 (GBM 1.354±0.020) MAE5/MAE1 1.708 (GBM 1.677±0.048)
+  H2 判据: MAE 单调递增 (每标的) -> PASS
+  超 null 内容: 真实比率 vs GBM 比率 (净差) 见上
+
+[H3] 拟合-预报悖论占比 (书 p.257 对数统计最差预报最好):
+  GC=F: 悖论占比 51.2% (n=6488) | GBM 50.8%±1.0% | 超2σ✗
+  SPY: 悖论占比 46.3% (n=8418) | GBM 50.7%±0.9% | 超2σ✗
+  BTC/USDT:USDT: 悖论占比 48.7% (n=1072) | GBM 50.6%±2.4% | 超2σ✗
+  ETH/USDT:USDT: 悖论占比 54.8% (n=1072) | GBM 50.7%±2.3% | 超2σ✗
+  H3 判据: 悖论占比 > GBM 2σ -> 0/4
+
+[对照-历史] c38 (ACF 谱近零); c44 (回归 R 触碰折返未超 null); 书 CH6 图 6.13 (correlogram 无一显著); 图 7.1 (预报发散); p.257 (对数拟合差预报好)
