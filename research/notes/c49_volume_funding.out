@@ -1,0 +1,38 @@
+# meta: study_id=c49_volume_funding date=2026-08-14 script_sha256=1cf7066a9910e9d854645fa57b03c9b3ca04a84dd88a6a66fdcc40277510a776 data_range=量: 3y; funding: 2026-05-11..2026-08-14 (pilot) params=tf=1h,n_perm=30,h3_ks=(8, 24, 72),min_n=100,gbm_seeds=30,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: 探测器自检 H1 置换 sanity [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c49 M4 U1 量、仓与价差忠实复现 (书 CH12 p.527-563 + CH13 carry 映射); 时段量 (书 U 形加密版), 量-波动, funding-方向/折返 pilot (3 个月样本限制); GBM/置换 30 次同管线; 描述层无入场, 无交易含义
+
+[H1] 时段量结构 (UTC 小时剖面, 美股时段 [13, 14, 15, 16, 17, 18, 19, 20] 点):
+  剖面: 00:1.05 01:1.02 02:0.94 03:0.86 04:0.83 05:0.84 06:0.90 07:0.95 08:1.05 09:0.99 10:0.94 11:0.93 12:1.16 13:1.47 14:1.83 15:1.67 16:1.50 17:1.17 18:0.97 19:0.85 20:0.81 21:0.72 22:0.74 23:0.74
+  美股时段块均值: 真实 1.28 | null 1.00±0.00 (带 [1.00,1.01])
+  H1 判据: 美股时段块 > null 95% 上界 -> PASS
+
+[H2] 量-波动 (BTC/ETH 1h):
+  BTC/USDT:USDT: ρ(vol,|ret|)=0.571 ρ(vol,range)=0.672 | 量领先 |ret| k=1/3/6/12: 0.333/0.296/0.252/0.204 | log(vol) ACF@168=0.459
+  ETH/USDT:USDT: ρ(vol,|ret|)=0.528 ρ(vol,range)=0.682 | 量领先 |ret| k=1/3/6/12: 0.282/0.254/0.228/0.194 | log(vol) ACF@168=0.492
+
+[H3] funding-方向 pilot (3 个月, 2026-05-11..08-14):
+  BTC/USDT:USDT k=8: 低1/3 组 ret +0.00099 (n=82) [MIN_N 不足] | null [-0.00234, +0.00339]
+  BTC/USDT:USDT k=8: 高1/3 组 ret -0.00185 (n=82) [MIN_N 不足] | null [-0.00209, +0.00282]
+  BTC/USDT:USDT k=24: 低1/3 组 ret -0.00115 (n=81) [MIN_N 不足] | null [-0.00302, +0.00693]
+  BTC/USDT:USDT k=24: 高1/3 组 ret -0.00427 (n=81) [MIN_N 不足] | null [-0.00616, +0.00526]
+  BTC/USDT:USDT k=72: 低1/3 组 ret -0.00697 (n=79) [MIN_N 不足] | null [-0.00808, +0.01831]
+  BTC/USDT:USDT k=72: 高1/3 组 ret -0.00682 (n=79) [MIN_N 不足] | null [-0.01317, +0.01626]
+  BTC/USDT:USDT 符号组 n: 正 192 负 53 (水平分位版已报 — 若 <100 只报水平分位)
+  ETH/USDT:USDT k=8: 低1/3 组 ret +0.00044 (n=82) [MIN_N 不足] | null [-0.00422, +0.00241]
+  ETH/USDT:USDT k=8: 高1/3 组 ret -0.00112 (n=82) [MIN_N 不足] | null [-0.00253, +0.00482]
+  ETH/USDT:USDT k=24: 低1/3 组 ret +0.00395 (n=81) [MIN_N 不足] | null [-0.00627, +0.00685]
+  ETH/USDT:USDT k=24: 高1/3 组 ret -0.00728 (n=81) [MIN_N 不足] | null [-0.00822, +0.01030]
+  ETH/USDT:USDT k=72: 低1/3 组 ret +0.01114 (n=79) [MIN_N 不足] | null [-0.01677, +0.01822]
+  ETH/USDT:USDT k=72: 高1/3 组 ret -0.02189 (n=79) [MIN_N 不足] | null [-0.02667, +0.02601]
+  ETH/USDT:USDT 符号组 n: 正 175 负 70 (水平分位版已报 — 若 <100 只报水平分位)
+
+[H4] funding-折返 pilot (触碰 + funding 三分位):
+  BTC/USDT:USDT 低1/3: D1 折返 50.2% (n=683) [MIN_N 通过] | null [48.4%, 50.7%]
+  BTC/USDT:USDT 高1/3: D1 折返 50.6% (n=573) [MIN_N 通过] | null [48.4%, 50.7%]
+  BTC/USDT:USDT 全: D1 折返 50.4% (n=1914)
+  ETH/USDT:USDT 低1/3: D1 折返 48.9% (n=642) [MIN_N 通过] | null [47.6%, 51.1%]
+  ETH/USDT:USDT 高1/3: D1 折返 48.4% (n=622) [MIN_N 通过] | null [47.6%, 51.1%]
+  ETH/USDT:USDT 全: D1 折返 49.2% (n=1832)
+
+[对照-历史] c12 (波动长记忆 H=0.93); c17 (触碰折返); 书 CH12 图 12.15 (U 形量); p.560 (tick 量≈实际量); CH13 p.597 (carry/forward bias)
