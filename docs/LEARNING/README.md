@@ -14,7 +14,7 @@
 | 模块 | 书对应章节 | 状态 |
 |---|---|---|
 | 0 地基 | CH1-2 | **✅ 完成（6 单元，2026-08-13）** |
-| 1 趋势家族 | CH5-8 | 未开始 |
+| 1 趋势家族 | CH5-8 | **✅ 完成（7 单元，2026-08-13）** |
 | 2 动量与振荡器 | CH9 | 未开始 |
 | 3 时间与季节 | CH10-11 | 未开始 |
 | 4 成交量与持仓 | CH12 | 未开始（需先确认数据） |
@@ -46,3 +46,5 @@
 - 模块 1：`module1/unit03_regression_trend.md`（回归分析与斜率趋势，✅ c44/c45）
 - 模块 1：`module1/unit04_time_series_components.md`（时间序列分解，方法论收口，无考证）
 - 模块 1：`module1/unit05_ma_and_lag.md`（移动平均与滞后，✅ c46）
+- 模块 1：`module1/unit06_trend_profit_source.md`（趋势系统的利润来源，✅ 收口于 c31/c33/c42）
+- 模块 1：`module1/unit07_system_comparison.md`（趋势系统比较与选速，✅ c47）
