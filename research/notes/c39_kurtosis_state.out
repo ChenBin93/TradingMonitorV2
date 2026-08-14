@@ -1,0 +1,27 @@
+# meta: study_id=c39_kurtosis_state date=2026-08-14 script_sha256=80671e22d895e5f581213f959f53455e71b024ed1de4af6038ff442f931328ce data_range=2023-08..2026-08 params=crypto=BTC/USDT:USDT+ETH/USDT:USDT,er_n=10,er_win=120,q=0.2/0.8,gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(BTC 1h 收益 n): n=26280 [PASS]; 探测器自检 峰度 golden [PASS]; GBM null 超额峰度≈0 (均值 0.200) [PASS]; MIN_N 每状态 n≥100 [PASS]
+# RESULTS: [学习级] c39 分布矩峰度 × 市场状态 (书 CH2 p.37-43: 负峰度=趋势/扁平, 正峰度=横盘/聚集); 状态=ER rolling 分位 (c27 口径: 高≥80th/低≤20th, win=120); 超额峰度=m4/m2²−3; 收益=对数; GBM 30 种子同 ER 状态切分; 描述层无入场, 无交易含义
+
+[峰度] 每标的×状态 收益超额峰度 (n) | GBM null (均值±σ):
+  BTC/USDT:USDT 高ER: kurt=+8.94 (n=5388) [MIN_N 通过] | GBM null +0.20±0.08
+  BTC/USDT:USDT 低ER: kurt=+11.05 (n=5288) [MIN_N 通过] | GBM null -0.11±0.06
+  BTC/USDT:USDT 中ER: kurt=+10.75 (n=15475) [MIN_N 通过] | GBM null -0.02±0.03
+  ETH/USDT:USDT 高ER: kurt=+19.53 (n=5374) [MIN_N 通过] | GBM null +0.20±0.08
+  ETH/USDT:USDT 低ER: kurt=+6.44 (n=5349) [MIN_N 通过] | GBM null -0.11±0.06
+  ETH/USDT:USDT 中ER: kurt=+9.09 (n=15428) [MIN_N 通过] | GBM null -0.02±0.03
+
+[H1] 趋势态峰度 < 横盘态峰度 (书的方向):
+  BTC/USDT:USDT: 高ER +8.94 vs 低ER +11.05 -> 趋势<横盘 ✓
+  ETH/USDT:USDT: 高ER +19.53 vs 低ER +6.44 -> 不成立
+  H1 判据: 两标的均 高ER峰度 < 低ER峰度 -> FAIL
+
+[H2] 真实 vs GBM null (超额峰度, null≈0):
+  BTC/USDT:USDT 高ER: 真实 +8.94 | GBM +0.20±0.08 -> 显著偏离 (偏差 +8.74)
+  BTC/USDT:USDT 低ER: 真实 +11.05 | GBM -0.11±0.06 -> 显著偏离 (偏差 +11.16)
+  BTC/USDT:USDT 中ER: 真实 +10.75 | GBM -0.02±0.03 -> 显著偏离 (偏差 +10.76)
+  ETH/USDT:USDT 高ER: 真实 +19.53 | GBM +0.20±0.08 -> 显著偏离 (偏差 +19.33)
+  ETH/USDT:USDT 低ER: 真实 +6.44 | GBM -0.11±0.06 -> 显著偏离 (偏差 +6.55)
+  ETH/USDT:USDT 中ER: 真实 +9.09 | GBM -0.02±0.03 -> 显著偏离 (偏差 +9.11)
+  H2 判据: 真实各状态峰度对 null 的偏差方向与幅度 (报告) -> 见上
+
+[对照-历史] c13 (收益右偏+下行厚尾, up:late 偏度 +2.48); c27 (高 ER 触碰折返更深); c31 (符号反持久); 书 CH2 p.37-43: 负峰度=趋势/扁平, 正峰度=横盘/聚集
