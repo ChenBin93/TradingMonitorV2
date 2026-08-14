@@ -1,0 +1,35 @@
+# meta: study_id=c40_swing_event_driven date=2026-08-14 script_sha256=7b2f455ac28f749eda0ca7e72235f153abeb532141cc72600e2681ca676ca968 data_range=2023-08..2026-08 params=crypto=BTC/USDT:USDT+ETH/USDT:USDT,tfs=1h,4h,filters=p1+p2+atr,T=1.0,W=24,er_win=120,gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(BTC 1h p1 全破位 1:1 n): n=581 [PASS]; 探测器自检 swing golden (确认滞后, 入场 bar=15) [PASS]; GBM null 1:1 WR≈0.50 (均值 0.509) [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c40 U1-1 swing 事件驱动忠实复现 (书 CH5, 补做书跳过的检验); MSV_{t−1} 防前视; 2 周期摆动点 + 确认滞后 1 bar; 保守版永远在场反转 (p.188 规则 1); 1:1 用官方引擎 (T=1.0, W=24); GBM 30 种子同管线; 描述层无入场, 无交易含义
+
+[H1] 破位后 1:1 胜率 vs GBM 同管线 (每 filter):
+  p1 BTC/USDT:USDT 1h: 真实 WR=50.4% (n=581) | GBM 50.3%±1.7% | 净差 +0.2% z=+0.1 未超
+  p1 BTC/USDT:USDT 4h: 真实 WR=51.1% (n=315) | GBM 50.3%±2.4% | 净差 +0.8% z=+0.3 未超
+  p1 ETH/USDT:USDT 1h: 真实 WR=49.1% (n=949) | GBM 50.0%±1.4% | 净差 -0.9% z=-0.6 未超
+  p1 ETH/USDT:USDT 4h: 真实 WR=51.1% (n=352) | GBM 50.0%±2.6% | 净差 +1.2% z=+0.4 未超
+    (H1 判据: 真实−GBM 净差 > 2σ; 每 filter 各报)
+  p2 BTC/USDT:USDT 1h: 真实 WR=50.3% (n=195) | GBM 60.0%±54.8% | 净差 -9.7% z=-0.2 未超
+  p2 BTC/USDT:USDT 4h: 真实 WR=54.5% (n=167) | GBM 50.6%±3.7% | 净差 +3.9% z=+1.1 未超
+  p2 ETH/USDT:USDT 1h: 真实 WR=52.6% (n=397) | GBM 49.8%±4.8% | 净差 +2.8% z=+0.6 未超
+  p2 ETH/USDT:USDT 4h: 真实 WR=48.4% (n=246) | GBM 49.4%±2.3% | 净差 -1.1% z=-0.5 未超
+    (H1 判据: 真实−GBM 净差 > 2σ; 每 filter 各报)
+  atr BTC/USDT:USDT 1h: 真实 WR=49.5% (n=984) | GBM 50.2%±1.2% | 净差 -0.7% z=-0.5 未超
+  atr BTC/USDT:USDT 4h: 真实 WR=51.2% (n=260) | GBM 50.3%±2.2% | 净差 +0.9% z=+0.4 未超
+  atr ETH/USDT:USDT 1h: 真实 WR=49.1% (n=1020) | GBM 50.2%±1.2% | 净差 -1.0% z=-0.9 未超
+  atr ETH/USDT:USDT 4h: 真实 WR=52.3% (n=239) | GBM 50.0%±2.0% | 净差 +2.3% z=+1.1 未超
+    (H1 判据: 真实−GBM 净差 > 2σ; 每 filter 各报)
+
+[H2] 横盘态 (ER 低分位) swing 破位信号数 vs 40 日 MA 转向信号数:
+  BTC/USDT:USDT 1h: swing 76 | MA 转向 58 | 不成立 [MIN_N 不足]
+  BTC/USDT:USDT 4h: swing 72 | MA 转向 39 | 不成立 [MIN_N 不足]
+  ETH/USDT:USDT 1h: swing 187 | MA 转向 49 | 不成立 [MIN_N 不足]
+  ETH/USDT:USDT 4h: swing 93 | MA 转向 28 | 不成立 [MIN_N 不足]
+  H2 判据: swing < MA 转向 (p1 filter) -> FAIL
+
+[H3] 每笔风险 (|入场−反向触发|) 随 filter: mean (median):
+  p1: 标的均值 median 风险 1003.051
+  p2: 标的均值 median 风险 1357.541
+  atr: 标的均值 median 风险 947.277
+  H3 判据: p2 median 风险均值 > p1 -> PASS
+
+[对照-历史] c21 (区间触碰 1:1: ΔWR 全过但 ΔE 未达 +0.05R); c14 (关键位围墙: 触碰后留存); c23/c25 (状态方向 1:1 未达); c27 (ER 分位状态); 书 CH5 p.187-190: MSV 防前视/规则 1/风险随 filter
