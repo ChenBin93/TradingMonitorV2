@@ -41,3 +41,5 @@
 - 模块 0：`module0/unit04_returns_and_annualization.md`（收益计算与年化，方法论，无考证）
 - 模块 0：`module0/unit05_moments_kurtosis.md`（分布矩与峰度，✅ c39）
 - 模块 0：`module0/unit06_autocorrelation_dw.md`（自相关与 DW 统计，✅ c38）
+- 模块 1：`module1/unit01_event_driven_swing.md`（事件驱动趋势与 swing 点位，✅ c40）
+- 模块 1：`module1/unit02_donchian.md`（N 日突破与 Donchian 4 周规则，✅ c41）
