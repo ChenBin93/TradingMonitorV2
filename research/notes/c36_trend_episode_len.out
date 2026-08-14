@@ -1,0 +1,32 @@
+# meta: study_id=c36_trend_episode_len date=2026-08-14 script_sha256=7898b1882e869ba2cd30e1c00106af3d74915657bda3f303111893f5a959a359 data_range=2023-08..2026-08 (对照共同 3y 窗) params=crypto=BTC/USDT:USDT+ETH/USDT:USDT,control=SPY+GC=F+EURUSD=X,ma_days=40,ma_w={'1h': 960, '4h': 240, '1d': 40},gbm_seeds=30,min_n=100,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(日线真实 mean 情节长(天)): 真实 15.2 | GBM 15.6 [PASS]; 探测器自检 MA 情节 golden [PASS]; GBM null 幅度 sanity (各频率情节长 ∈[0.5,100]天) [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c36 趋势情节长度 × 频率 (用户重释: 低频趋势更持久); 情节=40 日历日等价 MA 斜率符号段 (日线 MA40/4h MA240/1h MA960, 收盘 MA); slope=0 断且不计; 跨频率比较用日历天 (bar/bpd); GBM 同 n 同 μ/σ 同 MA; 描述层无入场, 无交易含义
+
+[情节] 每标的×每频率 mean 情节长 (bar/天), 中位数, P(≥20bar), n_episodes:
+  BTC/USDT:USDT 1h: mean=72bar (3.0天) med=4 P≥20= 0.246 n=353 [MIN_N 通过] | GBM mean 天 3.1±0.9
+  BTC/USDT:USDT 4h: mean=36bar (6.0天) med=4 P≥20= 0.260 n=177 [MIN_N 通过] | GBM mean 天 6.3±1.3
+  BTC/USDT:USDT 1d: mean=13bar (13.0天) med=4 P≥20= 0.185 n=81 [MIN_N 不足] | GBM mean 天 15.0±2.9
+  ETH/USDT:USDT 1h: mean=94bar (3.9天) med=4 P≥20= 0.254 n=268 [MIN_N 通过] | GBM mean 天 3.2±1.1
+  ETH/USDT:USDT 4h: mean=44bar (7.3天) med=4 P≥20= 0.250 n=144 [MIN_N 通过] | GBM mean 天 6.0±1.3
+  ETH/USDT:USDT 1d: mean=15bar (15.1天) med=4 P≥20= 0.229 n=70 [MIN_N 不足] | GBM mean 天 14.9±3.6
+  SPY 1d: mean=20bar (20.4天) med=6 P≥20= 0.286 n=35 [MIN_N 不足] | GBM mean 天 16.6±4.7
+  GC=F 1d: mean=15bar (14.6天) med=3 P≥20= 0.163 n=49 [MIN_N 不足] | GBM mean 天 16.8±5.6
+  EURUSD=X 1d: mean=13bar (13.0天) med=4 P≥20= 0.193 n=57 [MIN_N 不足] | GBM mean 天 14.9±4.2
+
+[H1] 真实日线情节长 (bar) > GBM 日线同管线 2σ:
+  BTC/USDT:USDT: 真实 13.037037037037036 bar | GBM 14.96810963039086 bar (σ 2.9 bar) | 超出未超
+  ETH/USDT:USDT: 真实 15.085714285714285 bar | GBM 14.891893773629283 bar (σ 3.6 bar) | 超出未超
+  SPY: 真实 20.37142857142857 bar | GBM 16.563851135803564 bar (σ 4.7 bar) | 超出未超
+  GC=F: 真实 14.591836734693878 bar | GBM 16.79568356862563 bar (σ 5.6 bar) | 超出未超
+  EURUSD=X: 真实 12.964912280701755 bar | GBM 14.92690060045007 bar (σ 4.2 bar) | 超出未超
+  H1 判据: 日线情节长 > GBM 2σ -> 0/5
+
+[H2] 超出 (真实−GBM mean 情节长, 天) 随频率:
+  BTC: 1h -0.1 天 | 4h -0.3 天 | 日线 -1.9 天
+  ETH: 1h +0.8 天 | 4h +1.3 天 | 日线 +0.2 天
+  H2 判据: 日线超出 > 1h 超出 -> FAIL
+
+[H3] GBM 各频率情节分布一致 (mean 天): 1h=3.1 | 4h=6.1 | 日线=15.6 (判据 相对最大偏差≤25%)
+  H3 判据: GBM 尺度不变 -> FAIL
+
+[对照-历史] c30/c32/c35: 书'低频噪声低'三口径证伪 (固定 bar 窗 持平 / 固定日历窗机械梯度 / 传统负梯度); c33: 日线无运行肥尾 (仅 ^TNX 例外) — 若日线趋势持久须经慢漂移; c34: MA40 系统 PF 随 ER 上升 (ρ=0.37); 本 c36 直接测 MA 斜率情节长度

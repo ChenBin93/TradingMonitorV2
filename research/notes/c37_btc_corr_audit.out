@@ -1,0 +1,20 @@
+# meta: study_id=c37_btc_corr_audit date=2026-08-14 script_sha256=65a8e8e0ed3e424fc009a416f246d77465811b79404e7815d24eefd81d6b1a6d data_range=2023-08..2026-08 (对照共同 3y 窗) params=crypto_n=20,control=SPY+GC=F+EURUSD=X,gbm_seeds=30,min_n=100,h1_rho=0.6,h2_eff=6,h3_eff=18,gate=MIN_GBM_SEEDS=30,MIN_N=100(学习级),学习级
+# GATE: gbm_seeds=30 无条件基线(BTC 1h 日收益序列长度): n=1095 [PASS]; 探测器自检 n_eff golden (完全相关=1, 独立=2) [PASS]; GBM null sanity n_eff 均值≥0.75×n_assets [PASS]; MIN_N 每序列 n≥100 [PASS]
+# RESULTS: [学习级] c37 BTC 相关性审计 (用户批评: 20 币伪复制); 日收益=close-to-close 对数收益 (daily_resample); n_eff=(Σλ)²/Σλ²; 分组: 加密/美股/金属/传统对照; 描述层无入场, 无交易含义
+
+[分组] 加密 (20 币): ADA/USDT:USDT,ARB/USDT:USDT,ATOM/USDT:USDT,AVAX/USDT:USDT,BCH/USDT:USDT,BNB/USDT:USDT,BTC/USDT:USDT,DOGE/USDT:USDT,DOT/USDT:USDT,ETH/USDT:USDT,INJ/USDT:USDT,LINK/USDT:USDT,LTC/USDT:USDT,NEAR/USDT:USDT,OP/USDT:USDT,SOL/USDT:USDT,SUI/USDT:USDT,TIA/USDT:USDT,UNI/USDT:USDT,XRP/USDT:USDT | 美股: SPY | 金属: GC=F | 传统对照: EURUSD=X
+
+[BTC-ρ] ρ(BTC, X) 分组均值与范围:
+  加密: mean=0.659 min=0.522 max=0.814 (n=19)
+  美股: mean=0.358 min=0.358 max=0.358 (n=1)
+  金属: mean=0.090 min=0.090 max=0.090 (n=1)
+  传统对照: mean=0.018 min=0.018 max=0.018 (n=1)
+  H1 判据: 加密组与 BTC 平均 ρ ≥ 0.6 -> PASS
+
+[n_eff] 20 币相关矩阵: n_eff = 2.15 (λ 谱前5: 13.5, 0.9, 0.6, 0.6, 0.5)
+  H2 判据: n_eff ≤ 6 -> PASS
+
+[H3] GBM 同管线 (30 种子 × 20 条独立 GBM): n_eff mean=19.65 std=0.03 min=19.59 max=19.71
+  H3 判据: n_eff ≥ 18 -> PASS
+
+[截面复核] c30 Spearman ρ=0.275 (20 币 ER 排名) 的有效独立 样本 = n_eff 2.2 — 20 币≈2 个独立信息源; c34 ρ=0.367 (25 市场) 含 5 传统异质市场 (与 BTC 低相关), 独立信息更多 (20 币 n_eff + 5 对照)
