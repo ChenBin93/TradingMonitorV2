@@ -50,3 +50,4 @@
 - 模块 1：`module1/unit07_system_comparison.md`（趋势系统比较与选速，✅ c47）
 - 模块 2：`module2/unit01_momentum_rsi.md`（动量与振荡器，✅ c48）
 - 模块 4：`module4/unit01_volume_funding.md`（成交量、持仓与价差，✅ c49；funding pilot 受 3 个月数据限制）
+- 模块 6：`module6/unit01_kama.md`（KAMA 自适应均线，✅ c50）
