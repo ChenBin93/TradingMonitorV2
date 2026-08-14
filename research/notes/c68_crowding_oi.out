@@ -1,0 +1,15 @@
+# meta: study_id=c68_crowding_oi date=2026-08-14 script_sha256=398f1775d4c0227b0c7efbb9bc055c4789864dadba1cd5c63c9b3e12272bb07b data_range=funding 2026-05-11..08-14 (3 个月, API 上限); 1h 止 08-01; OI 历史不可得 (降级标注) params=crowd_q=0.8,crowd_win=30d,K=24,W=24,perm=30,min_n=100,gate=MIN_N=100(学习级),学习级
+# GATE: 拥挤分位 golden + null sanity [PASS]; MIN_N n≥100 [PASS]
+# RESULTS: [学习级] c68 聪明钱验证③: funding×OI 联合拥挤度 — **OI 历史不可得 (OKX 端点全 404), 降级为 funding 单独拥挤度**; 拥挤 = funding 滚动 90 日分位 ≥80th; H1 方向 K=24; H2 触碰折返 调节; null = funding 标签打乱 30 次; 3 个月窗口 (API 上限) 标注; 描述层无入场, 无交易含义
+
+[降级声明] OI 历史端点全部 404 (open-interest-volume-history / 变体; 仅 public/open-interest 当前快照无历史) — OI 攀升 维度不可得, H1 联合增量 / H2 OI 增量**均未检验**, 本砖为 funding 单独拥挤度复检
+
+[H1] funding 拥挤 → 未来 24h 方向 (close[t+24]>close[t]):
+  拥挤 bar 后方向 46.1% (n=7470) [MIN_N 通过] | null 48.8%±3.0% | 超额 -2.7% (z=-0.89) -> 未超
+  无条件基准 (全部 bar 方向): 48.9% (n=516077)
+
+[H2] funding 拥挤 → 触碰折返调节 (c49 H4 复检):
+  拥挤触碰折返 50.1% (n=9920) [MIN_N 通过] | 非拥挤 50.2% (n=664217) | 差 -0.0%
+  null (标签打乱): 拥挤触碰折返 48.8%±3.0%
+
+[对照-历史] c49 (funding 方向/折返无调节 — H3/H4 null); c66 (量能条件作用); 本砖: funding 单独拥挤度复检 + OI 不可得降级; 2310.14973 质量警告 (OI 报价口径交叉核对) 因 OI 不可得不适用
