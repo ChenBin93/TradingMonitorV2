@@ -13,7 +13,7 @@
 ## 模块
 | 模块 | 书对应章节 | 状态 |
 |---|---|---|
-| 0 地基 | CH1-2 | 学习中（U0-1 进行中） |
+| 0 地基 | CH1-2 | **✅ 完成（6 单元，2026-08-13）** |
 | 1 趋势家族 | CH5-8 | 未开始 |
 | 2 动量与振荡器 | CH9 | 未开始 |
 | 3 时间与季节 | CH10-11 | 未开始 |
@@ -35,5 +35,9 @@
 - 书原文提取文本在 `/tmp/opencode/TSaM.txt`（gitignored 的 PDF 在 research/TSaM.pdf）
 
 ## 单元索引
-- 模块 0：`module0/unit01_noise_and_er.md`（噪声与效率比 ER，✅ 含 c30 考证结论）
-- 模块 0：`module0/unit02_run_fat_tail.md`（随机游走与运行肥尾，✅ 含 c31 考证结论）
+- 模块 0：`module0/unit01_noise_and_er.md`（噪声与效率比 ER，✅ c27/c29/c30/c32/c34/c35/c36/c37）
+- 模块 0：`module0/unit02_run_fat_tail.md`（随机游走与运行肥尾，✅ c31/c33）
+- 模块 0：`module0/unit03_frequency_and_style.md`（数据频率与交易风格，✅ 收口于 c30/c32/c35/c36）
+- 模块 0：`module0/unit04_returns_and_annualization.md`（收益计算与年化，方法论，无考证）
+- 模块 0：`module0/unit05_moments_kurtosis.md`（分布矩与峰度，✅ c39）
+- 模块 0：`module0/unit06_autocorrelation_dw.md`（自相关与 DW 统计，✅ c38）
