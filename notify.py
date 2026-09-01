@@ -142,3 +142,56 @@ class Feishu:
                 logger.warning(f"Feishu image send failed: {resp.code} {resp.msg}")
         except Exception as e:
             logger.error(f"Feishu image send error: {e}")
+
+    def send_rich(self, title: str, blocks: list[dict]):
+        """富文本消息 — 一条消息内嵌文本+多图 (防刷屏)
+
+        blocks: [{"text": str}, {"image": 本地路径}, ...] 按顺序排列
+        上传图片 → 构造 post 富文本 (md 段 + img 段) → 一次发送
+        """
+        import lark_oapi
+        client = self._sdk_client()
+        if client is None:
+            logger.error("Feishu send_rich: SDK client 不可用")
+            return
+        # 1) 上传所有图片 → image_key
+        content_lines = []
+        for b in blocks:
+            if "image" in b and b["image"]:
+                key = self.upload_image(b["image"])
+                if key:
+                    content_lines.append(("img", key))
+                else:
+                    content_lines.append(("text", f"[图上传失败: {b.get('image')}]"))
+            else:
+                content_lines.append(("text", b.get("text", "")))
+        # 2) 构造 post 富文本 content (文本段 + 图片段交替)
+        content = []
+        for kind, val in content_lines:
+            if kind == "text" and val.strip():
+                content.append([{"tag": "text", "text": val}])
+            elif kind == "img":
+                content.append([{"tag": "img", "image_key": val}])
+        if not content:
+            return
+        post = {"zh_cn": {"title": title, "content": content}}
+        try:
+            request = (
+                lark_oapi.api.im.v1.CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(
+                    lark_oapi.api.im.v1.CreateMessageRequestBody.builder()
+                    .receive_id(self._chat_id)
+                    .msg_type("post")
+                    .content(lark_oapi.JSON.marshal(post))
+                    .build()
+                )
+                .build()
+            )
+            resp = client.im.v1.message.create(request)
+            if resp.code == 0:
+                logger.info(f"Feishu rich sent: {len(content_lines)} blocks")
+            else:
+                logger.warning(f"Feishu rich send failed: {resp.code} {resp.msg}")
+        except Exception as e:
+            logger.error(f"Feishu rich send error: {e}")

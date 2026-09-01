@@ -568,9 +568,9 @@ def get_symbols(okx: OKXClient, config: dict) -> list[str]:
     return okx.get_top_symbols(config.get("top_n", 20))
 
 
-def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
+def _send_warning_chart(cache: KlineCache, sym: str,
                         item: dict | None = None, tf: str = "1h"):
-    """为预警标的生成 K线图并推送飞书 (失败静默, 不影响主流程)
+    """为预警标的生成 K线图 → 返回 (sym, path); 失败返回 None (静默)
 
     图表内容: 顶部信息栏 (4H方向/日线一致性/统计状态/关键位距离)
              + 1h K线 + BB + MA60 + 1h/4h 关键位 + 预警标注 + 成交量
@@ -672,9 +672,10 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
                           df_15m=df15_raw, levels_15m_chart=levels_15m_chart,
                           df_4h=df4_raw, levels_4h_chart=levels_4h_chart)
         if path:
-            feishu.send_image(path, caption=f"📊 {sym} {tf} 预警图")
+            return sym, path
     except Exception as e:
         logger.warning(f"Chart {sym} failed: {e}")
+    return None
 
 
 def do_scan(
@@ -1735,17 +1736,17 @@ async def async_main():
                         if item is not None:
                             lines_out.append(f"  {sym_short} 状态: {_stat_line(item)}")
                 push_text = "\n".join(lines_out)
-                feishu.send(push_text)
 
-                # ── 图表推送 (可选): 最高级别预警配 K线图 ──
+                # ── 富文本推送: 一条消息 = 汇总文本 + 内嵌预警图 (防刷屏) ──
                 # 配置: config.yaml -> feishu_image: {enabled, max_per_scan, min_level}
+                img_cfg = config.get("feishu_image", {})
+                blocks: list[dict] = []
+                chart_syms: list[str] = []
                 try:
-                    img_cfg = config.get("feishu_image", {})
                     if img_cfg.get("enabled", False):
-                        min_level = img_cfg.get("min_level", "L3")
-                        max_charts = int(img_cfg.get("max_per_scan", 2))
+                        min_level = img_cfg.get("min_level", "L2")
+                        max_charts = int(img_cfg.get("max_per_scan", 3))
                         # 按级别排序取最严重的标的 (L3 > L2 > L1)
-                        chart_syms: list[str] = []
                         for _, sym_short, w, _dow, _pr in sorted(
                                 ranked, key=lambda x: x[0]):
                             if w["level"] < min_level or len(chart_syms) >= max_charts:
@@ -1755,9 +1756,19 @@ async def async_main():
                             if full and full not in chart_syms:
                                 chart_syms.append(full)
                         for full in chart_syms:
-                            _send_warning_chart(feishu, cache, full, warnings.get(full, {}))
+                            r = _send_warning_chart(cache, full, warnings.get(full, {}))
+                            if r:
+                                blocks.append({"image": r[1]})
                 except Exception as e:
                     logger.warning(f"Chart push failed: {e}")
+
+                if blocks:
+                    # 图文混合: 先文本汇总, 图直接跟在后面
+                    rich_blocks = [{"text": push_text}] + blocks
+                    feishu.send_rich(f"⚡ 预警 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()}",
+                                     rich_blocks)
+                else:
+                    feishu.send(push_text)
                 diag_lines = []
                 for sym, item in warnings.items():
                     d = item.get("diag") or {}
