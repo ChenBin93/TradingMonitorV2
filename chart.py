@@ -240,7 +240,9 @@ def make_chart(
     # 数据准备
     if "timestamp" in df.columns:
         df = df.set_index("timestamp")
-    df = df.sort_index().tail(n_bars)
+    df = df.sort_index()
+    c_full = df["close"].to_numpy(float)  # 全量 close (BB/MA 用长历史)
+    df = df.tail(n_bars)
     if len(df) < 20:
         return ""
 
@@ -252,14 +254,15 @@ def make_chart(
     idx = df.index
     price_last = float(c[-1]) if len(c) else 0.0
 
-    # 默认指标 (若未提供)
+    # 默认指标 (BB40/MA60 用全量历史计算, 取尾部显示)
     if bb is None:
-        sma = df["close"].rolling(40, min_periods=40).mean()
-        sd = df["close"].rolling(40, min_periods=40).std(ddof=0)
+        cs_full = pd.Series(c_full, dtype=float)
+        sma = cs_full.rolling(40, min_periods=40).mean()
+        sd = cs_full.rolling(40, min_periods=40).std(ddof=0)
         bb = (sma, sma + 2 * sd, sma - 2 * sd)
     ma, up, lo_ = bb
-    if ma60 is None and "close" in df.columns:
-        ma60 = df["close"].rolling(60, min_periods=60).mean()
+    if ma60 is None:
+        ma60 = pd.Series(c_full, dtype=float).rolling(60, min_periods=60).mean()
     # 外部传入的指标序列按同一尾部对齐 (tail(n_bars) 后可能短于 df); 统一返回 numpy
     def _align(s):
         if s is None:
@@ -406,27 +409,34 @@ def make_chart(
     ax2.bar(x, v, color=vol_colors, width=width, alpha=0.7)
     ax2.set_ylabel("Vol", color=C_TEXT, fontsize=8)
 
-    # 辅助: 在面板上画布林带 + MA20 (基于面板自身 close)
-    def _draw_bb(ax, close_series, x_arr, period=20, std=2.0):
-        cs = pd.Series(close_series, dtype=float)
+    # 辅助: 在面板上画布林带 + MA20 — 用全量历史计算, 只取尾部显示
+    # close_full: 全量 close 序列 (未截断); x_arr: 面板 x 坐标 (长度 = 显示根数)
+    def _draw_bb(ax, close_full, x_arr, period=20, std=2.0, n_show=None):
+        n_show = n_show or len(x_arr)
+        cs = pd.Series(close_full, dtype=float)
         sma = cs.rolling(period, min_periods=period).mean()
         sd = cs.rolling(period, min_periods=period).std(ddof=0)
         up = sma + std * sd
         lo = sma - std * sd
+        ma20 = cs.rolling(20, min_periods=20).mean()
+        # 取尾部 n_show 根 (与面板显示对齐)
+        sma, up, lo, ma20 = (s.tail(n_show).to_numpy(float)
+                             for s in (sma, up, lo, ma20))
         ax.fill_between(x_arr, up, lo, color=C_BB, alpha=0.10, zorder=1)
         ax.plot(x_arr, sma, color=C_BB, linewidth=0.8, alpha=0.65)
         ax.plot(x_arr, up, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
         ax.plot(x_arr, lo, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
         # MA20 (橙)
-        ma20 = cs.rolling(20, min_periods=20).mean()
         ax.plot(x_arr, ma20, color="#d08770", linewidth=1.0, alpha=0.85)
 
     # ── 左: 15M 短线面板 (最近 n_bars 根 ≈ 12小时) ──
     if ax15 is not None and df_15m is not None:
-        d15 = df_15m.copy()
-        if "timestamp" in d15.columns:
-            d15 = d15.set_index("timestamp")
-        d15 = d15.sort_index().tail(n_bars)
+        d15_full = df_15m.copy()
+        if "timestamp" in d15_full.columns:
+            d15_full = d15_full.set_index("timestamp")
+        d15_full = d15_full.sort_index()
+        c15_full = d15_full["close"].to_numpy(float)  # 全量 close (布林/MA 用)
+        d15 = d15_full.tail(n_bars)
         o15 = d15["open"].to_numpy(float)
         h15 = d15["high"].to_numpy(float)
         l15 = d15["low"].to_numpy(float)
@@ -441,8 +451,8 @@ def make_chart(
                 (x15[i] - w15 / 2, min(o15[i], c15[i])), w15,
                 abs(c15[i] - o15[i]) or 1e-6,
                 facecolor=col15, edgecolor=col15, linewidth=0.35))
-        # 15M 布林带 + MA20
-        _draw_bb(ax15, c15, x15)
+        # 15M 布林带 + MA20 (全量历史计算, 尾部显示)
+        _draw_bb(ax15, c15_full, x15)
         # 15M 关键位 (带 band)
         for lv in (levels_15m_chart or []):
             if isinstance(lv, dict):
@@ -479,10 +489,12 @@ def make_chart(
 
     # ── 右: 4H 大周期面板 (横向并排) ──
     if ax3 is not None and df_4h is not None:
-        d4 = df_4h.copy()
-        if "timestamp" in d4.columns:
-            d4 = d4.set_index("timestamp")
-        d4 = d4.sort_index().tail(n_bars)
+        d4_full = df_4h.copy()
+        if "timestamp" in d4_full.columns:
+            d4_full = d4_full.set_index("timestamp")
+        d4_full = d4_full.sort_index()
+        c4_full = d4_full["close"].to_numpy(float)  # 全量 close (布林/MA 用)
+        d4 = d4_full.tail(n_bars)
         o4 = d4["open"].to_numpy(float)
         h4 = d4["high"].to_numpy(float)
         l4 = d4["low"].to_numpy(float)
@@ -496,8 +508,8 @@ def make_chart(
             ax3.add_patch(Rectangle(
                 (x4[i] - w4 / 2, min(o4[i], c4[i])), w4, abs(c4[i] - o4[i]) or 1e-6,
                 facecolor=col4, edgecolor=col4, linewidth=0.4))
-        # 4H 布林带 + MA20
-        _draw_bb(ax3, c4, x4)
+        # 4H 布林带 + MA20 (全量历史计算, 尾部显示)
+        _draw_bb(ax3, c4_full, x4)
         # 4H 关键位 (带 band)
         for lv in (levels_4h_chart or []):
             if isinstance(lv, dict):
