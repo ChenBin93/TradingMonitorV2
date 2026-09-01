@@ -213,7 +213,7 @@ def make_chart(
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
+    import matplotlib.ticker as mtick
     from matplotlib.patches import Rectangle
     from matplotlib import font_manager
 
@@ -337,13 +337,9 @@ def make_chart(
                  bbox=dict(boxstyle="round,pad=0.35", facecolor="#262b38",
                            edgecolor=C_GRID, linewidth=0.6))
 
-    # ── 主图: K线 (时间戳 x 轴, 保证时间轴真实) ──
-    x = mdates.date2num(idx.to_pydatetime()) if hasattr(idx, "to_pydatetime") else np.arange(len(df))
+    # ── 主图: K线 (x 轴 = 距最新 K 线的根数, 0 为最新) ──
+    x = np.arange(len(df))
     width = 0.65
-    # 时间轴跨度 (日) → K线宽度 (避免 1H 图宽线重叠)
-    if len(x) > 1 and hasattr(idx, "to_pydatetime"):
-        span_days = (x[-1] - x[0])
-        width = max(0.3, min(0.7, span_days / len(x) * 0.8))
     for i in range(len(df)):
         color = C_UP if c[i] >= o[i] else C_DOWN
         ax1.plot([x[i], x[i]], [l[i], h[i]], color=color, linewidth=0.8, zorder=2)
@@ -408,7 +404,7 @@ def make_chart(
                 textcoords="offset points", xytext=(8, -10), fontsize=8,
                 color=C_TEXT, zorder=6)
 
-    ax1.set_title(f"{symbol}  {tf}  (UTC: {idx[-1]:%m-%d %H:%M})",
+    ax1.set_title(f"{symbol}  {tf}  (横轴: 距最新K线根数)",
                   color=C_TEXT, fontsize=11, loc="left")
     ax1.legend(loc="upper left", fontsize=7, facecolor=C_BG, edgecolor=C_GRID,
                labelcolor=C_TEXT)
@@ -430,10 +426,8 @@ def make_chart(
         l15 = d15["low"].to_numpy(float)
         c15 = d15["close"].to_numpy(float)
         v15 = d15["volume"].to_numpy(float) if "volume" in d15.columns else np.ones(len(d15))
-        x15 = mdates.date2num(d15.index.to_pydatetime()) if hasattr(d15.index, "to_pydatetime") else np.arange(len(d15))
+        x15 = np.arange(len(d15))  # 根数坐标, 0=最老, n-1=最新
         w15 = 0.65
-        if len(x15) > 1 and hasattr(d15.index, "to_pydatetime"):
-            w15 = max(0.25, min(0.7, (x15[-1] - x15[0]) / len(d15) * 0.8))
         for i in range(len(d15)):
             col15 = C_UP if c15[i] >= o15[i] else C_DOWN
             ax15.plot([x15[i], x15[i]], [l15[i], h15[i]], color=col15, linewidth=0.6)
@@ -458,8 +452,10 @@ def make_chart(
         vol15 = [C_UP if c15[i] >= o15[i] else C_DOWN for i in range(len(d15))]
         ax15v.bar(x15, v15, color=vol15, width=w15, alpha=0.7)
         ax15v.set_ylabel("Vol", color=C_TEXT, fontsize=8)
-        ax15v.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
-        ax15v.xaxis.set_major_locator(mdates.AutoDateLocator())
+        # 横轴 = 距最新 K 线的根数 (0 = 最新)
+        ax15v.xaxis.set_major_locator(mtick.MaxNLocator(6))
+        ax15v.xaxis.set_major_formatter(mtick.FuncFormatter(
+            lambda t, _p: f"-{int(len(d15) - 1 - t)}" if t < len(d15) - 1 else "0"))
         for lbl in ax15v.get_xticklabels():
             lbl.set_rotation = 0
 
@@ -474,10 +470,8 @@ def make_chart(
         l4 = d4["low"].to_numpy(float)
         c4 = d4["close"].to_numpy(float)
         v4 = d4["volume"].to_numpy(float) if "volume" in d4.columns else np.ones(len(d4))
-        x4 = mdates.date2num(d4.index.to_pydatetime()) if hasattr(d4.index, "to_pydatetime") else np.arange(len(d4))
+        x4 = np.arange(len(d4))  # 根数坐标
         w4 = 0.65
-        if len(x4) > 1 and hasattr(d4.index, "to_pydatetime"):
-            w4 = max(0.3, min(0.7, (x4[-1] - x4[0]) / len(d4) * 0.8))
         for i in range(len(d4)):
             col4 = C_UP if c4[i] >= o4[i] else C_DOWN
             ax3.plot([x4[i], x4[i]], [l4[i], h4[i]], color=col4, linewidth=0.7)
@@ -502,15 +496,17 @@ def make_chart(
         vol4 = [C_UP if c4[i] >= o4[i] else C_DOWN for i in range(len(d4))]
         ax4.bar(x4, v4, color=vol4, width=w4, alpha=0.7)
         ax4.set_ylabel("Vol", color=C_TEXT, fontsize=8)
-        # 4H 时间轴
-        ax4.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
-        ax4.xaxis.set_major_locator(mdates.AutoDateLocator())
+        # 横轴 = 距最新 K 线的根数
+        ax4.xaxis.set_major_locator(mtick.MaxNLocator(6))
+        ax4.xaxis.set_major_formatter(mtick.FuncFormatter(
+            lambda t, _p: f"-{int(len(d4) - 1 - t)}" if t < len(d4) - 1 else "0"))
         for lbl in ax4.get_xticklabels():
             lbl.set_rotation = 0
 
-    # X轴时间 (左 1H)
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
-    ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
+    # X轴 (1H) = 距最新 K 线的根数
+    ax2.xaxis.set_major_locator(mtick.MaxNLocator(6))
+    ax2.xaxis.set_major_formatter(mtick.FuncFormatter(
+        lambda t, _p: f"-{int(len(df) - 1 - t)}" if t < len(df) - 1 else "0"))
     for lbl in ax2.get_xticklabels():
         lbl.set_rotation = 0
 
