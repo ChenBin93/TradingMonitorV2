@@ -277,15 +277,13 @@ def make_chart(
     fname = f"{symbol.replace('/', '_').replace(':', '_')}_{tf}.png"
     path = os.path.join(out_dir, fname)
 
-    # ── 布局: 信息栏(整宽) + 15M/1H/4H 三面板横向并排 ──
+    # ── 布局: 信息栏(整宽) + 4H/1H/15M 三面板横向并排 (大周期→小周期) ──
     has_15m = df_15m is not None and len(df_15m) >= 20
     has_4h = df_4h is not None and len(df_4h) >= 20
     n_col = 1 + int(has_15m) + int(has_4h)
-    wratios = [1] * n_col
-    fig = plt.figure(figsize=(6.8 * n_col, 6.6), facecolor=C_BG)
+    fig = plt.figure(figsize=(5.2 * n_col, 6.6), facecolor=C_BG)
     gs = fig.add_gridspec(3, n_col, height_ratios=[0.85, 3.2, 1],
-                          width_ratios=wratios,
-                          hspace=0.14, wspace=0.12,
+                          hspace=0.16, wspace=0.18,
                           left=0.05, right=0.985, top=0.92, bottom=0.08)
     ax0 = fig.add_subplot(gs[0, :])   # 信息栏 (整宽)
     ax0.axis("off")
@@ -294,19 +292,19 @@ def make_chart(
     ax1 = ax2 = None
     ax3 = ax4 = None
     col = 0
-    if has_15m:
-        ax15 = fig.add_subplot(gs[1, col])    # 15M 价格
-        ax15v = fig.add_subplot(gs[2, col])   # 15M 量
-        plot_axes += [ax15, ax15v]
+    if has_4h:
+        ax3 = fig.add_subplot(gs[1, col])     # 4H 价格 (最左, 大周期)
+        ax4 = fig.add_subplot(gs[2, col], sharex=ax3)  # 4H 量 (同 x)
+        plot_axes += [ax3, ax4]
         col += 1
-    ax1 = fig.add_subplot(gs[1, col])         # 1H 主图
-    ax2 = fig.add_subplot(gs[2, col])         # 1H 量
+    ax1 = fig.add_subplot(gs[1, col])         # 1H 主图 (中间)
+    ax2 = fig.add_subplot(gs[2, col], sharex=ax1)      # 1H 量 (同 x)
     plot_axes += [ax1, ax2]
     col += 1
-    if has_4h:
-        ax3 = fig.add_subplot(gs[1, col])     # 4H 价格
-        ax4 = fig.add_subplot(gs[2, col])     # 4H 量
-        plot_axes += [ax3, ax4]
+    if has_15m:
+        ax15 = fig.add_subplot(gs[1, col])    # 15M 价格 (最右, 小周期)
+        ax15v = fig.add_subplot(gs[2, col], sharex=ax15)  # 15M 量 (同 x)
+        plot_axes += [ax15, ax15v]
     for ax in plot_axes:
         ax.set_facecolor(C_BG)
         ax.grid(True, color=C_GRID, linewidth=0.6, alpha=0.6)
@@ -409,6 +407,11 @@ def make_chart(
     ax1.legend(loc="upper left", fontsize=7, facecolor=C_BG, edgecolor=C_GRID,
                labelcolor=C_TEXT)
     ax1.set_ylabel("Price", color=C_TEXT, fontsize=8)
+    # K线图横轴 = 距最新 K 线的根数 (显式设置, 不依赖 VOL 的 sharex)
+    ax1.xaxis.set_major_locator(mtick.MaxNLocator(6))
+    ax1.xaxis.set_major_formatter(mtick.FuncFormatter(
+        lambda t, _p: f"-{int(len(df) - 1 - t)}" if t < len(df) - 1 else "0"))
+    ax1.tick_params(axis="x", colors=C_TEXT, labelsize=7)
 
     # ── 下图: 成交量 ──
     vol_colors = [C_UP if c[i] >= o[i] else C_DOWN for i in range(len(df))]
@@ -449,6 +452,11 @@ def make_chart(
         ax15.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
         ax15.set_title(f"15M (最近 {len(d15)} 根)", color=C_DIM, fontsize=9, loc="left")
         ax15.set_ylabel("15M", color=C_TEXT, fontsize=8)
+        # K线图横轴 = 距最新 K 线的根数
+        ax15.xaxis.set_major_locator(mtick.MaxNLocator(6))
+        ax15.xaxis.set_major_formatter(mtick.FuncFormatter(
+            lambda t, _p: f"-{int(len(d15) - 1 - t)}" if t < len(d15) - 1 else "0"))
+        ax15.tick_params(axis="x", colors=C_TEXT, labelsize=7)
         vol15 = [C_UP if c15[i] >= o15[i] else C_DOWN for i in range(len(d15))]
         ax15v.bar(x15, v15, color=vol15, width=w15, alpha=0.7)
         ax15v.set_ylabel("Vol", color=C_TEXT, fontsize=8)
@@ -492,6 +500,11 @@ def make_chart(
         ax3.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
         ax3.set_title(f"4H 大周期 (最近 {len(d4)} 根)", color=C_DIM, fontsize=9, loc="left")
         ax3.set_ylabel("4H", color=C_TEXT, fontsize=8)
+        # K线图横轴 = 距最新 K 线的根数
+        ax3.xaxis.set_major_locator(mtick.MaxNLocator(6))
+        ax3.xaxis.set_major_formatter(mtick.FuncFormatter(
+            lambda t, _p: f"-{int(len(d4) - 1 - t)}" if t < len(d4) - 1 else "0"))
+        ax3.tick_params(axis="x", colors=C_TEXT, labelsize=7)
         # 4H 成交量
         vol4 = [C_UP if c4[i] >= o4[i] else C_DOWN for i in range(len(d4))]
         ax4.bar(x4, v4, color=vol4, width=w4, alpha=0.7)
