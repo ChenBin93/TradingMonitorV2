@@ -521,33 +521,27 @@ def make_chart(
     for lbl in ax2.get_xticklabels():
         lbl.set_rotation = 0
 
-    # 预警标注: 按 tf 分配到对应面板 (此时 x4/x15 已定义)
-    def _draw_alert(ax, x_last, a):
-        ax.scatter([x_last], [a.get("price", 0)],
-                    marker="v" if a.get("level", "L2") == "L3" else "o",
-                    s=90 if a.get("level") == "L3" else 60,
-                    color={"L1": "#5a9cf8", "L2": "#e6a23c", "L3": "#e15241"}
-                    .get(a.get("level"), "#e6a23c"),
-                    zorder=5, edgecolor="white", linewidth=0.6)
-        ax.annotate(
-            a.get("text", ""), (x_last, a.get("price", 0)),
-            textcoords="offset points", xytext=(-60, -10), fontsize=8,
-            color=C_TEXT, zorder=6)
+    # 预警标注: 按 tf 分配到对应面板, 在面板右上角用文字标注 (不画K线标记)
+    def _draw_alert(ax, a):
+        # 右上角文字标注: 级别图标 + 描述
+        icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(a.get("level", "L2"), "")
+        color = {"L1": "#5a9cf8", "L2": "#e6a23c", "L3": "#e15241"} \
+            .get(a.get("level", "L2"), "#e6a23c")
+        ax.text(0.985, 0.96, f"{icon} {a.get('text', '')}",
+                transform=ax.transAxes, fontsize=8, color=color,
+                ha="right", va="top", alpha=0.95,
+                bbox=dict(boxstyle="round,pad=0.25", facecolor="#262b38",
+                          edgecolor=color, linewidth=0.5, alpha=0.85))
 
     if alerts:
         for a in alerts:
             a_tf = a.get("tf", tf)
             if a_tf == "4h" and ax3 is not None:
-                _draw_alert(ax3, x4[-1], a)
+                _draw_alert(ax3, a)
             elif a_tf == "15m" and ax15 is not None:
-                _draw_alert(ax15, x15[-1], a)
+                _draw_alert(ax15, a)
             else:
-                _draw_alert(ax1, x[-1], a)  # 默认 1H 主图
-    # 所有面板 Y 轴右侧预留标注空间 (文字不截断)
-    for ax in (ax1, ax3, ax15):
-        if ax is not None:
-            y0, y1 = ax.get_ylim()
-            ax.set_ylim(y0, y1 * 1.06)
+                _draw_alert(ax1, a)  # 默认 1H 主图
 
     fig.savefig(path, dpi=110, bbox_inches="tight", facecolor=C_BG)
     plt.close(fig)
