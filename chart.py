@@ -89,67 +89,86 @@ def fused_levels(df: pd.DataFrame, price: float, atr: float,
     """融合关键位 — 成交量分布 (HVN) + swing 极点, 业界推荐做法
 
     原理: 关键位本质是"资金聚集处" (成交量大的价格区), swing 极点只是近似。
+    输出对齐真实极值: 位价落在波段高低点 K 线的影线端 (最接近聚类中心的
+    swing 极值), 而不是聚类中心; 每个位带 band 字段 = 聚类成员价差一半
+    (画区域用)。
+
     步骤:
-      1. volume_profile 算 HVN 节点 (量聚集 bin)
-      2. 相邻 HVN 合并成带 (距离 < merge_atr×ATR), 取量加权中心 — 消除
-         64920/65018/65214 这类密集团
-      3. 加入 swing 极点 (find_swing_levels) 作为候选 (补足量带未覆盖的
-         支撑/阻力), 与量带对齐时标记触次
-      4. 量带中心相对当前价定支撑/阻力, 精选输出
+      1. volume_profile 算 HVN 节点 + 自算 swing 极值 (含原始影线价)
+      2. 按支撑/阻力分组后组内聚类 (避免跨价格合并)
+      3. 位价 = 聚类内最接近中心的 swing 极值 (若聚类含 swing);
+         否则 = 聚类中心 (纯 HVN 位)
+      4. band = 聚类成员价差一半; 每侧限 2 条
     只影响图表标注, 不改研究/检测逻辑。
     """
     from volume_profile import compute_volume_profile
-    from support_resistance import find_swing_levels
 
     if df is None or len(df) < 60 or price <= 0 or atr <= 0:
         return []
     cur = float(price)
     merge_d = merge_atr * atr
 
-    # 1) HVN 量节点 (原始 bin) + swing 极点
+    # ── swing 极值 (含原始影线价: 波段高低点 K 线的 high/low) ──
+    highs = df["high"].values
+    lows = df["low"].values
+    n = len(df)
+    swing_ext = []  # (price, side, idx) — price 为影线端价
+    for i in range(2, n - 2):
+        if highs[i] >= max(highs[i - 2:i + 3]):
+            swing_ext.append((float(highs[i]), "resistance", i))
+        if lows[i] <= min(lows[i - 2:i + 3]):
+            swing_ext.append((float(lows[i]), "support", i))
+
+    # ── 候选: HVN 量节点 + swing 极值 ──
     vp = compute_volume_profile(df, lookback=min(200, len(df)), n_bins=n_bins)
-    cand = []  # [(price, vol_pct, touch, src)]
+    cand = []  # (price, vol, src, ext_price)
     if vp:
-        cand += [(float(h["price"]), float(h["volume_pct"]), 0, "vp")
+        cand += [(float(h["price"]), float(h["volume_pct"]), "vp", None)
                  for h in vp.get("hvns", [])]
-    swing = find_swing_levels(df, lookback=min(600, len(df)))
-    for l in swing:
-        cand.append((float(l.price), 0.0, int(l.touch_count), "swing"))
+    for p, side, _i in swing_ext:
+        cand.append((p, 0.0, f"swing_{side}", p))
     if not cand:
         return []
 
-    # 2) 先按 side 分组 (支撑=低于当前价, 阻力=高于当前价), 再组内聚类 —
-    #    避免跨价格合并导致"支撑变阻力" (62986/63109 合并后中心越过当前价)
+    # ── 按 side 分组聚类 (组内聚合并保留极值) ──
     def _cluster(cands):
         if not cands:
             return []
         cands.sort(key=lambda x: x[0])
         bands = []
-        for p, vol, touch, src in cands:
+        for p, vol, src, ext in cands:
             if bands and abs(p - bands[-1][0]) <= merge_d:
-                c0, v0, t0, s0 = bands[-1]
-                w0 = v0 if v0 > 0 else 0.5  # swing 候选无量 → 半权重
+                c0, v0, s0, exts = bands[-1]
+                w0 = v0 if v0 > 0 else 0.5
                 w1 = vol if vol > 0 else 0.5
-                bands[-1] = ((c0 * w0 + p * w1) / (w0 + w1),
-                             v0 + vol, t0 + touch, s0 + "," + src)
+                new_c = (c0 * w0 + p * w1) / (w0 + w1)
+                if ext is not None:
+                    exts.append(ext)
+                bands[-1] = (new_c, v0 + vol, s0 + "," + src, exts)
             else:
-                bands.append((p, vol, touch, src))
+                bands.append((p, vol, src, [ext] if ext is not None else []))
         return bands
 
     cand_sup = [c for c in cand if c[0] < cur]
     cand_res = [c for c in cand if c[0] > cur]
-    bands = [(p, v, t, s, "support") for p, v, t, s in _cluster(cand_sup)]
-    bands += [(p, v, t, s, "resistance") for p, v, t, s in _cluster(cand_res)]
+    bands = [(p, v, s, e, "support") for p, v, s, e in _cluster(cand_sup)]
+    bands += [(p, v, s, e, "resistance") for p, v, s, e in _cluster(cand_res)]
 
-    # 3) 精选 (量占比优先, 触次次之)
+    # ── 位价对齐真实极值 + band 宽度 ──
     out = []
-    for center, vol, touch, src, side in bands:
+    for center, vol, src, exts, side in bands:
         if abs(center - cur) > max_dist_pct * cur:
             continue
+        px = center
+        if exts:
+            # 最接近聚类中心的 swing 极值 → 落在影线端
+            px = min(exts, key=lambda e: abs(e - center))
+        band_w = (max(exts + [center]) - min(exts + [center])) / 2 if exts else merge_d / 2
+        band_w = max(band_w, atr * 0.15)  # 最小带宽 (避免太窄)
         out.append({
-            "price": center, "side": side,
-            "touch": touch, "vol_pct": vol,
-            "dist": abs(center - cur), "src": src,
+            "price": px, "side": side,
+            "touch": len(exts), "vol_pct": vol,
+            "dist": abs(px - cur), "src": src, "band": band_w,
         })
     final = []
     for side in ("support", "resistance"):
@@ -305,18 +324,27 @@ def make_chart(
     if ma60 is not None and np.isfinite(ma60).any():
         ax1.plot(x, ma60, color=C_MA60, linewidth=1.1, label="MA60")
 
-    # 1h 关键位: 支撑绿 / 阻力红, 带价格标签
+    # 1h 关键位: 支撑绿 / 阻力红, 位带区域 (price±band) + 中线 + 价格标签
     if levels:
-        y_lo, y_hi = ax1.get_ylim()
         for lv in levels:
             if isinstance(lv, dict):
                 px = lv["price"]
                 side = lv.get("side", "")
+                band = lv.get("band") or 0.0
                 col = C_SUP if side == "support" else C_RES if side == "resistance" else C_LEVEL
-                ax1.axhline(px, color=col, linewidth=0.9, alpha=0.55, linestyle="-")
+                # 位带区域 (半透明, 关键位是区域不是单线)
+                if band > 0:
+                    ax1.axhspan(px - band, px + band, color=col, alpha=0.10,
+                                linewidth=0, zorder=0.5)
+                    ax1.axhline(px - band, color=col, linewidth=0.6, alpha=0.35,
+                                linestyle=":")
+                    ax1.axhline(px + band, color=col, linewidth=0.6, alpha=0.35,
+                                linestyle=":")
+                # 中线 = 真实极值 (影线端)
+                ax1.axhline(px, color=col, linewidth=1.0, alpha=0.75, linestyle="-")
                 ax1.text(len(df) - 1, px, f" {px:.0f}",
                          color=col, fontsize=7.5, va="bottom", ha="right",
-                         alpha=0.9)
+                         alpha=0.95)
             else:
                 ax1.axhline(lv, color=C_LEVEL, linewidth=0.8, alpha=0.5, linestyle=":")
     # 4h 关键位: 灰色虚线
