@@ -65,11 +65,11 @@ logging:
 account:
   risk_pct: 1
   leverage: 10
-# 预警图表推送 (需飞书应用开通 im:resource 权限; 图文混合一条消息)
+# 预警图表推送 (需飞书应用开通 im:resource 权限; 全图表化一条消息)
 feishu_image:
   enabled: true         # 已开通权限 (2026-09-01)
-  max_per_scan: 3       # 每轮扫描最多几张图 (防刷屏)
-  min_level: L2         # 最低预警级别 (L3 最严重; 只给 >= 此级别发图)
+  max_per_scan: 5       # 每轮扫描最多几张图 (防刷屏)
+  min_level: L1         # 所有级别都出图 (L3 > L2 > L1 优先排序)
 watchlist:
 - BTC/USDT:USDT
 - ETH/USDT:USDT

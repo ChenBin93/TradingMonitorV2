@@ -569,10 +569,11 @@ def get_symbols(okx: OKXClient, config: dict) -> list[str]:
 
 
 def _send_warning_chart(cache: KlineCache, sym: str,
-                        item: dict | None = None, tf: str = "1h"):
+                        item: dict | None = None, tf: str = "1h",
+                        config: dict | None = None):
     """为预警标的生成 K线图 → 返回 (sym, path); 失败返回 None (静默)
 
-    图表内容: 顶部信息栏 (4H方向/日线一致性/统计状态/关键位距离)
+    图表内容: 顶部信息栏 (4H方向/日线一致性/统计状态/关键位距离/开仓比例)
              + 1h K线 + BB + MA60 + 1h/4h 关键位 + 预警标注 + 成交量
     """
     try:
@@ -654,6 +655,19 @@ def _send_warning_chart(cache: KlineCache, sym: str,
         d1h = dists.get("1h") or {}
         info["dist4h"] = f"{d4h.get('sup_dist_atr', '')}/{d4h.get('res_dist_atr', '')}"
         info["dist1h"] = f"{d1h.get('sup_dist_atr', '')}/{d1h.get('res_dist_atr', '')}"
+
+        # ── 开仓比例 (ATR 自适应仓位): 本金开仓比例 = 价格×风险%/(ATR×杠杆) ──
+        try:
+            rp = (config or {}).get("account", {}).get("risk_pct", 1)
+            lv = (config or {}).get("account", {}).get("leverage", 10)
+            atr1_now = float(atr[-1]) or 0.0
+            if atr1_now > 0 and price_now > 0:
+                pos_pct = price_now * rp / (atr1_now * lv)
+                info["pos_ref"] = (f"开仓比例参考 {pos_pct:.0f}% ({lv}x, 1.0ATR止损)"
+                                   if pos_pct <= 100 else
+                                   f"⚠波大 开仓比例参考 {pos_pct:.0f}%")
+        except Exception:
+            pass
 
         # 预警标注: 全部 warns 按 tf 分配, 标注带具体点位 + ATR 距离
         alerts = []
@@ -1786,36 +1800,44 @@ async def async_main():
                             lines_out.append(f"  {sym_short} 状态: {_stat_line(item)}")
                 push_text = "\n".join(lines_out)
 
-                # ── 富文本推送: 一条消息 = 汇总文本 + 内嵌预警图 (防刷屏) ──
-                # 配置: config.yaml -> feishu_image: {enabled, max_per_scan, min_level}
+                # ── 富文本推送: 全图表化 — 每标的一行标题 + 预警图 (防刷屏) ──
                 img_cfg = config.get("feishu_image", {})
                 blocks: list[dict] = []
                 chart_syms: list[str] = []
                 try:
-                    if img_cfg.get("enabled", False):
-                        min_level = img_cfg.get("min_level", "L2")
-                        max_charts = int(img_cfg.get("max_per_scan", 3))
-                        # 按级别排序取最严重的标的 (L3 > L2 > L1)
-                        for _, sym_short, w, _dow, _pr in sorted(
-                                ranked, key=lambda x: x[0]):
-                            if w["level"] < min_level or len(chart_syms) >= max_charts:
-                                continue
-                            full = next((s for s, it in warnings.items()
-                                         if it.get("_short") == sym_short), None)
-                            if full and full not in chart_syms:
-                                chart_syms.append(full)
-                        for full in chart_syms:
-                            r = _send_warning_chart(cache, full, warnings.get(full, {}))
-                            if r:
-                                blocks.append({"image": r[1]})
+                    max_charts = int(img_cfg.get("max_per_scan", 5))
+                    min_level = img_cfg.get("min_level", "L1")
+                    # 按级别排序取标的 (L3 > L2 > L1), 每标的一张图
+                    for _, sym_short, w, _dow, _pr in sorted(
+                            ranked, key=lambda x: x[0]):
+                        if w["level"] < min_level or len(chart_syms) >= max_charts:
+                            continue
+                        full = next((s for s, it in warnings.items()
+                                     if it.get("_short") == sym_short), None)
+                        if full and full not in chart_syms:
+                            chart_syms.append(full)
+                    for full in chart_syms:
+                        r = _send_warning_chart(cache, full, warnings.get(full, {}),
+                                                config=config)
+                        if r:
+                            short = full.replace("-USDT-SWAP", "/USDT").split(":")[0]
+                            # 每张图前加一行: 标的名 + 最高级别 + 状态摘要
+                            item = warnings.get(full, {})
+                            top_w = max(item.get("warns") or [{"level": "L1"}],
+                                        key=lambda x: x.get("level", "L1"))
+                            icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(
+                                top_w.get("level", "L1"), "")
+                            stat = (item.get("stats") or {}).get("1h") or {}
+                            lbl = f"{icon} {short}  {top_w.get('desc', '')}" \
+                                  + (f"  [{stat.get('label', '')}]" if stat.get("label") else "")
+                            blocks.append({"text": lbl})
+                            blocks.append({"image": r[1]})
                 except Exception as e:
                     logger.warning(f"Chart push failed: {e}")
 
                 if blocks:
-                    # 图文混合: 先文本汇总, 图直接跟在后面
-                    rich_blocks = [{"text": push_text}] + blocks
                     feishu.send_rich(f"⚡ 预警 {scan_start.strftime('%H:%M')} 北京时间 {_current_session()}",
-                                     rich_blocks)
+                                     blocks)
                 else:
                     feishu.send(push_text)
                 diag_lines = []

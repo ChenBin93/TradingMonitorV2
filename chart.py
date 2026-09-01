@@ -328,6 +328,9 @@ def make_chart(
         d1 = str(info.get("dist1h", ""))
         line1 = (f"4H方向: {seg4_s}   |   {daily_s}   |   1H状态: {stat_s}")
         line2 = (f"距关键位(支撑/阻力 ATR): 4H [{d4}]   1H [{d1}]")
+        pos_ref = info.get("pos_ref", "")
+        if pos_ref:
+            line2 += f"   |   {pos_ref}"
         ax0.text(0.005, 0.72, line1, transform=ax0.transAxes,
                  fontsize=10, color=C_TEXT, va="center",
                  bbox=dict(boxstyle="round,pad=0.35", facecolor="#262b38",
