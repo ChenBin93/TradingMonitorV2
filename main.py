@@ -1698,6 +1698,7 @@ async def async_main():
 
     scan_count = 0
     first_scan = True
+    last_shown_syms: set = set()  # 上轮已展示图表的标的 (轮换, 避免固定品类)
 
     def _wait_next_5m():
         nonlocal first_scan
@@ -1855,17 +1856,27 @@ async def async_main():
                 blocks: list[dict] = []
                 chart_syms: list[str] = []
                 try:
+                    # 选图: 级别降序 (L3>L2>L1), 同级别内优先上轮未展示的标的
+                    # (轮换避免固定品类), 每标的仅一张
                     max_charts = int(img_cfg.get("max_per_scan", 5))
                     min_level = img_cfg.get("min_level", "L1")
-                    # 按级别排序取标的 (L3 > L2 > L1), 每标的一张图
-                    for _, sym_short, w, _dow, _pr in sorted(
-                            ranked, key=lambda x: x[0]):
-                        if w["level"] < min_level or len(chart_syms) >= max_charts:
-                            continue
+                    cand_syms: list[str] = []  # 全部有预警的标的 (去重)
+                    sym_rank: dict = {}         # full -> 最高级别
+                    for _, sym_short, w, _dow, _pr in ranked:
                         full = next((s for s, it in warnings.items()
                                      if it.get("_short") == sym_short), None)
-                        if full and full not in chart_syms:
-                            chart_syms.append(full)
+                        if not full or full in cand_syms:
+                            continue
+                        cand_syms.append(full)
+                        sym_rank[full] = w["level"]
+                    # 排序: 级别降序, 同级别内上轮未展示的优先
+                    chart_syms = sorted(
+                        cand_syms,
+                        key=lambda s: (sym_rank[s],
+                                       s in last_shown_syms),  # False 优先
+                        reverse=True)  # "L3" > "L1", False > True
+                    chart_syms = [s for s in chart_syms
+                                  if sym_rank[s] >= min_level][:max_charts]
                     for full in chart_syms:
                         r = _send_warning_chart(cache, full, warnings.get(full, {}),
                                                 config=config)
@@ -1882,6 +1893,8 @@ async def async_main():
                                   + (f"  [{stat.get('label', '')}]" if stat.get("label") else "")
                             blocks.append({"text": lbl})
                             blocks.append({"image": r[1]})
+                    # 记录本轮展示的标的 (供下轮轮换)
+                    last_shown_syms = set(chart_syms)
                 except Exception as e:
                     logger.warning(f"Chart push failed: {e}")
 
