@@ -594,19 +594,19 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
         bb = bollinger_bands(d)
         ma60 = d["close"].rolling(60, min_periods=60).mean()
 
-        # ── 4H 关键位 (虚线, 大方向参考) — 同样用融合算法 ──
-        levels_4h = []
+        # ── 4H 大周期 (辅助面板 + 关键位) ──
+        df4_raw = None
+        levels_4h_chart = []
         try:
-            df4 = cache.get_df(sym, "4h")
-            if df4 is not None and len(df4) >= 60:
-                d4 = df4.copy()
+            df4_raw = cache.get_df(sym, "4h")
+            if df4_raw is not None and len(df4_raw) >= 60:
+                d4 = df4_raw.copy()
                 if "timestamp" in d4.columns:
                     d4 = d4.sort_values("timestamp").reset_index(drop=True)
                 atr4 = _atr_series(d4)
                 atr4_now = float(atr4[-1]) or 1.0
-                l4 = fused_levels(d4, price_now, atr4_now,
-                                  max_dist_pct=0.04, max_each_side=2)
-                levels_4h = [x["price"] for x in l4]
+                levels_4h_chart = fused_levels(d4, price_now, atr4_now,
+                                               max_dist_pct=0.06, max_each_side=2)
         except Exception:
             pass
 
@@ -638,13 +638,10 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
                 "text": f"{top.get('desc', '')[:18]}",
             })
 
-        # 关键位标注: 1h 支撑/阻力分色 + 价格标签
-        levels_1h = []
-        for lv in levels[:6]:
-            levels_1h.append({"price": lv["price"], "side": lv["side"],
-                              "touch": lv.get("touch", 0)})
-        path = make_chart(d, sym, tf, levels=levels_1h, levels_4h=levels_4h,
-                          alerts=alerts, bb=bb, ma60=ma60, info=info)
+        # 关键位标注: 1h 支撑/阻力 (带 band) + 4H 辅助面板
+        path = make_chart(d, sym, tf, levels=levels,
+                          alerts=alerts, bb=bb, ma60=ma60, info=info,
+                          df_4h=df4_raw, levels_4h_chart=levels_4h_chart)
         if path:
             feishu.send_image(path, caption=f"📊 {sym} {tf} 预警图")
     except Exception as e:
