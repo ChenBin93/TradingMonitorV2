@@ -388,19 +388,7 @@ def make_chart(
                          alpha=0.9,
                          bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
                                    edgecolor=col4, linewidth=0.3, alpha=0.7))
-    # 预警标注
-    if alerts:
-        for a in alerts:
-            ax1.scatter([x[-1]], [a.get("price", c[-1])],
-                        marker="v" if a.get("level", "L2") == "L3" else "o",
-                        s=90 if a.get("level") == "L3" else 60,
-                        color={"L1": "#5a9cf8", "L2": "#e6a23c", "L3": "#e15241"}
-                        .get(a.get("level"), "#e6a23c"),
-                        zorder=5, edgecolor="white", linewidth=0.6)
-            ax1.annotate(
-                a.get("text", ""), (x[-1], a.get("price", c[-1])),
-                textcoords="offset points", xytext=(8, -10), fontsize=8,
-                color=C_TEXT, zorder=6)
+    # 预警标注移动到所有面板渲染之后 (需 x4/x15 已定义)
 
     ax1.set_title(f"{symbol}  {tf}  (横轴: 距最新K线根数)",
                   color=C_TEXT, fontsize=11, loc="left")
@@ -532,6 +520,34 @@ def make_chart(
         lambda t, _p: f"-{int(len(df) - 1 - t)}" if t < len(df) - 1 else "0"))
     for lbl in ax2.get_xticklabels():
         lbl.set_rotation = 0
+
+    # 预警标注: 按 tf 分配到对应面板 (此时 x4/x15 已定义)
+    def _draw_alert(ax, x_last, a):
+        ax.scatter([x_last], [a.get("price", 0)],
+                    marker="v" if a.get("level", "L2") == "L3" else "o",
+                    s=90 if a.get("level") == "L3" else 60,
+                    color={"L1": "#5a9cf8", "L2": "#e6a23c", "L3": "#e15241"}
+                    .get(a.get("level"), "#e6a23c"),
+                    zorder=5, edgecolor="white", linewidth=0.6)
+        ax.annotate(
+            a.get("text", ""), (x_last, a.get("price", 0)),
+            textcoords="offset points", xytext=(-60, -10), fontsize=8,
+            color=C_TEXT, zorder=6)
+
+    if alerts:
+        for a in alerts:
+            a_tf = a.get("tf", tf)
+            if a_tf == "4h" and ax3 is not None:
+                _draw_alert(ax3, x4[-1], a)
+            elif a_tf == "15m" and ax15 is not None:
+                _draw_alert(ax15, x15[-1], a)
+            else:
+                _draw_alert(ax1, x[-1], a)  # 默认 1H 主图
+    # 所有面板 Y 轴右侧预留标注空间 (文字不截断)
+    for ax in (ax1, ax3, ax15):
+        if ax is not None:
+            y0, y1 = ax.get_ylim()
+            ax.set_ylim(y0, y1 * 1.06)
 
     fig.savefig(path, dpi=110, bbox_inches="tight", facecolor=C_BG)
     plt.close(fig)

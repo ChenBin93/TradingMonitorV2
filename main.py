@@ -655,15 +655,23 @@ def _send_warning_chart(cache: KlineCache, sym: str,
         info["dist4h"] = f"{d4h.get('sup_dist_atr', '')}/{d4h.get('res_dist_atr', '')}"
         info["dist1h"] = f"{d1h.get('sup_dist_atr', '')}/{d1h.get('res_dist_atr', '')}"
 
-        # 预警标注 (从 item 取最高级别)
+        # 预警标注: 全部 warns 按 tf 分配 (4H/1H/15M 面板各自标注)
         alerts = []
         warns = (item or {}).get("warns") or []
-        if warns:
-            top = max(warns, key=lambda w: w.get("level", "L1"))
+        for w in warns:
+            w_tf = w.get("tf", tf)
+            # 无 price 的预警 (布林/波动启动) 用对应面板最新收盘价
+            px = w.get("price")
+            if px is None:
+                if w_tf == "4h" and df4_raw is not None:
+                    px = float(df4_raw["close"].iloc[-1])
+                elif w_tf == "15m" and df15_raw is not None:
+                    px = float(df15_raw["close"].iloc[-1])
+                else:
+                    px = float(d["close"].iloc[-1])
             alerts.append({
-                "price": float(d["close"].iloc[-1]),
-                "level": top.get("level", "L2"),
-                "text": f"{top.get('desc', '')[:18]}",
+                "price": float(px), "level": w.get("level", "L2"),
+                "tf": w_tf, "text": f"{w.get('desc', '')[:18]}",
             })
 
         # 关键位标注: 1h 支撑/阻力 (带 band) + 15M/4H 辅助面板
