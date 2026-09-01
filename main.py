@@ -618,7 +618,7 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
                 atr15 = _atr_series(d15)
                 atr15_now = float(atr15[-1]) or 1.0
                 levels_15m_chart = fused_levels(d15, price_now, atr15_now,
-                                                max_dist_pct=0.04, max_each_side=2)
+                                                max_dist_pct=0.04)
         except Exception:
             pass
 
@@ -634,7 +634,7 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
                 atr4 = _atr_series(d4)
                 atr4_now = float(atr4[-1]) or 1.0
                 levels_4h_chart = fused_levels(d4, price_now, atr4_now,
-                                               max_dist_pct=0.06, max_each_side=2)
+                                               max_dist_pct=0.06)
         except Exception:
             pass
 

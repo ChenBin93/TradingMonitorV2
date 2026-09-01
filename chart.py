@@ -85,20 +85,20 @@ def pick_levels(levels: list[dict], price: float, atr: float,
 
 def fused_levels(df: pd.DataFrame, price: float, atr: float,
                  n_bins: int = 40, merge_atr: float = 0.8,
-                 max_dist_pct: float = 0.04, max_each_side: int = 2) -> list[dict]:
+                 max_dist_pct: float = 0.04, max_each_side: int = 1,
+                 band_atr: float = 0.4) -> list[dict]:
     """融合关键位 — 成交量分布 (HVN) + swing 极点, 业界推荐做法
 
     原理: 关键位本质是"资金聚集处" (成交量大的价格区), swing 极点只是近似。
-    输出对齐真实极值: 位价落在波段高低点 K 线的影线端 (最接近聚类中心的
-    swing 极值), 而不是聚类中心; 每个位带 band 字段 = 聚类成员价差一半
-    (画区域用)。
+    输出:
+      - 位价对齐真实极值: 聚类内最接近中心的 swing 极值 (影线端)
+      - band 统一 = band_atr×ATR (所有周期视觉一致, 不过宽不过窄)
+      - 每侧最多 max_each_side 条
 
     步骤:
-      1. volume_profile 算 HVN 节点 + 自算 swing 极值 (含原始影线价)
+      1. volume_profile 算 HVN 节点 + 自算 swing 极值
       2. 按支撑/阻力分组后组内聚类 (避免跨价格合并)
-      3. 位价 = 聚类内最接近中心的 swing 极值 (若聚类含 swing);
-         否则 = 聚类中心 (纯 HVN 位)
-      4. band = 聚类成员价差一半; 每侧限 2 条
+      3. 位价 = 聚类内最接近中心的 swing 极值; band = band_atr×ATR
     只影响图表标注, 不改研究/检测逻辑。
     """
     from volume_profile import compute_volume_profile
@@ -154,7 +154,7 @@ def fused_levels(df: pd.DataFrame, price: float, atr: float,
     bands = [(p, v, s, e, "support") for p, v, s, e in _cluster(cand_sup)]
     bands += [(p, v, s, e, "resistance") for p, v, s, e in _cluster(cand_res)]
 
-    # ── 位价对齐真实极值 + band 宽度 ──
+    # ── 位价对齐真实极值 + band 统一 (band_atr×ATR, 视觉一致) ──
     out = []
     for center, vol, src, exts, side in bands:
         if abs(center - cur) > max_dist_pct * cur:
@@ -163,12 +163,11 @@ def fused_levels(df: pd.DataFrame, price: float, atr: float,
         if exts:
             # 最接近聚类中心的 swing 极值 → 落在影线端
             px = min(exts, key=lambda e: abs(e - center))
-        band_w = (max(exts + [center]) - min(exts + [center])) / 2 if exts else merge_d / 2
-        band_w = max(band_w, atr * 0.15)  # 最小带宽 (避免太窄)
         out.append({
             "price": px, "side": side,
             "touch": len(exts), "vol_pct": vol,
-            "dist": abs(px - cur), "src": src, "band": band_w,
+            "dist": abs(px - cur), "src": src,
+            "band": max(band_atr * atr, atr * 0.1),  # 统一带宽, 最小 0.1×ATR
         })
     final = []
     for side in ("support", "resistance"):
@@ -354,7 +353,7 @@ def make_chart(
     if ma60 is not None and np.isfinite(ma60).any():
         ax1.plot(x, ma60, color=C_MA60, linewidth=1.1, label="MA60")
 
-    # 1h 关键位: 支撑绿 / 阻力红, 位带区域 (price±band) + 中线 + 价格标签
+    # 1h 关键位: 支撑绿 / 阻力红, 浅色 band 区域 + 清晰中线 + 价格标签
     if levels:
         for lv in levels:
             if isinstance(lv, dict):
@@ -362,19 +361,18 @@ def make_chart(
                 side = lv.get("side", "")
                 band = lv.get("band") or 0.0
                 col = C_SUP if side == "support" else C_RES if side == "resistance" else C_LEVEL
-                # 位带区域 (半透明, 关键位是区域不是单线)
+                # 位带区域: 浅色填充 (弱化, 不干扰K线)
                 if band > 0:
-                    ax1.axhspan(px - band, px + band, color=col, alpha=0.10,
+                    ax1.axhspan(px - band, px + band, color=col, alpha=0.05,
                                 linewidth=0, zorder=0.5)
-                    ax1.axhline(px - band, color=col, linewidth=0.6, alpha=0.35,
-                                linestyle=":")
-                    ax1.axhline(px + band, color=col, linewidth=0.6, alpha=0.35,
-                                linestyle=":")
-                # 中线 = 真实极值 (影线端)
-                ax1.axhline(px, color=col, linewidth=1.0, alpha=0.75, linestyle="-")
-                ax1.text(x[-1], px, f" {px:.0f}",
-                         color=col, fontsize=7.5, va="bottom", ha="right",
-                         alpha=0.95)
+                # 中线 = 真实极值 (影线端), 清晰但不过度
+                ax1.axhline(px, color=col, linewidth=1.1, alpha=0.8, linestyle="-")
+                # 价格标签: 线右侧, 带轻微底色
+                ax1.text(x[-1], px, f"  {px:.0f}",
+                         color=col, fontsize=8, va="center", ha="right",
+                         alpha=1.0, fontweight="bold",
+                         bbox=dict(boxstyle="round,pad=0.15", facecolor=C_BG,
+                                   edgecolor=col, linewidth=0.4, alpha=0.8))
             else:
                 ax1.axhline(lv, color=C_LEVEL, linewidth=0.8, alpha=0.5, linestyle=":")
     # 4H 关键位叠加到 1H 主图 (虚线, 大周期参考)
@@ -383,11 +381,13 @@ def make_chart(
             if isinstance(lv, dict):
                 px4 = lv["price"]
                 col4 = C_SUP if lv.get("side") == "support" else C_RES
-                ax1.axhline(px4, color=col4, linewidth=0.9, alpha=0.45,
+                ax1.axhline(px4, color=col4, linewidth=0.9, alpha=0.5,
                             linestyle="--", zorder=1.5)
-                ax1.text(x[-1], px4, f" 4H:{px4:.0f}",
-                         color=col4, fontsize=6.5, va="bottom", ha="right",
-                         alpha=0.8)
+                ax1.text(x[-1], px4, f"  4H {px4:.0f}",
+                         color=col4, fontsize=7, va="center", ha="right",
+                         alpha=0.9,
+                         bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
+                                   edgecolor=col4, linewidth=0.3, alpha=0.7))
     # 预警标注
     if alerts:
         for a in alerts:
@@ -445,8 +445,13 @@ def make_chart(
                 b15 = lv.get("band") or 0.0
                 col15 = C_SUP if lv.get("side") == "support" else C_RES
                 if b15 > 0:
-                    ax15.axhspan(px15 - b15, px15 + b15, color=col15, alpha=0.10, linewidth=0)
-                ax15.axhline(px15, color=col15, linewidth=0.8, alpha=0.7)
+                    ax15.axhspan(px15 - b15, px15 + b15, color=col15, alpha=0.05, linewidth=0)
+                ax15.axhline(px15, color=col15, linewidth=1.0, alpha=0.8)
+                ax15.text(x15[-1], px15, f"  {px15:.0f}",
+                          color=col15, fontsize=7, va="center", ha="right",
+                          alpha=1.0, fontweight="bold",
+                          bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
+                                    edgecolor=col15, linewidth=0.3, alpha=0.8))
             else:
                 ax15.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
         ax15.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
@@ -493,8 +498,13 @@ def make_chart(
                 b4 = lv.get("band") or 0.0
                 col4 = C_SUP if lv.get("side") == "support" else C_RES
                 if b4 > 0:
-                    ax3.axhspan(px4 - b4, px4 + b4, color=col4, alpha=0.10, linewidth=0)
-                ax3.axhline(px4, color=col4, linewidth=0.8, alpha=0.7)
+                    ax3.axhspan(px4 - b4, px4 + b4, color=col4, alpha=0.05, linewidth=0)
+                ax3.axhline(px4, color=col4, linewidth=1.0, alpha=0.8)
+                ax3.text(x4[-1], px4, f"  {px4:.0f}",
+                          color=col4, fontsize=7, va="center", ha="right",
+                          alpha=1.0, fontweight="bold",
+                          bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
+                                    edgecolor=col4, linewidth=0.3, alpha=0.8))
             else:
                 ax3.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
         ax3.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
