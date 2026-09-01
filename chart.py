@@ -362,6 +362,42 @@ def make_chart(
                  bbox=dict(boxstyle="round,pad=0.35", facecolor="#262b38",
                            edgecolor=C_GRID, linewidth=0.6))
 
+    # 辅助: 在面板上画布林带 + MA20 — 用全量历史计算, 只取尾部显示
+    # close_full: 全量 close 序列 (未截断); x_arr: 面板 x 坐标 (长度 = 显示根数)
+    def _draw_bb(ax, close_full, x_arr, period=20, std=2.0, n_show=None):
+        n_show = n_show or len(x_arr)
+        cs = pd.Series(close_full, dtype=float)
+        sma = cs.rolling(period, min_periods=period).mean()
+        sd = cs.rolling(period, min_periods=period).std(ddof=0)
+        up = sma + std * sd
+        lo = sma - std * sd
+        ma20 = cs.rolling(20, min_periods=20).mean()
+        # 取尾部 n_show 根 (与面板显示对齐)
+        sma, up, lo, ma20 = (s.tail(n_show).to_numpy(float)
+                             for s in (sma, up, lo, ma20))
+        ax.fill_between(x_arr, up, lo, color=C_BB, alpha=0.10, zorder=1)
+        ax.plot(x_arr, sma, color=C_BB, linewidth=0.8, alpha=0.65)
+        ax.plot(x_arr, up, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
+        ax.plot(x_arr, lo, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
+        # MA20 (橙)
+        ax.plot(x_arr, ma20, color="#d08770", linewidth=1.0, alpha=0.85,
+                label="MA20")
+
+    # 辅助: 画大周期参考位 (虚线 + 标签)
+    def _draw_extra(ax, x_last, extra_list, label=""):
+        for lv in (extra_list or []):
+            if not isinstance(lv, dict):
+                continue
+            px_e = lv["price"]
+            col_e = C_SUP if lv.get("side") == "support" else C_RES
+            ax.axhline(px_e, color=col_e, linewidth=0.9, alpha=0.5,
+                       linestyle="--", zorder=1.5)
+            ax.text(x_last, px_e, f"  {label}{px_e:.0f}",
+                    color=col_e, fontsize=7, va="center", ha="right",
+                    alpha=0.9,
+                    bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
+                              edgecolor=col_e, linewidth=0.3, alpha=0.7))
+
     # ── 主图: K线 (x 轴 = 距最新 K 线的根数, 0 为最新) ──
     x = np.arange(len(df))
     width = 0.65
@@ -372,14 +408,8 @@ def make_chart(
             (x[i] - width / 2, min(o[i], c[i])), width, abs(c[i] - o[i]) or 1e-6,
             facecolor=color, edgecolor=color, linewidth=0.5, zorder=3))
 
-    # 布林带 (ma/up/lo_ 已统一为 numpy)
-    ax1.fill_between(x, up, lo_, color=C_BB, alpha=0.12, zorder=1)
-    ax1.plot(x, ma, color=C_BB, linewidth=0.9, alpha=0.7, label="BB40")
-    ax1.plot(x, up, color=C_BB, linewidth=0.7, alpha=0.5, linestyle="--")
-    ax1.plot(x, lo_, color=C_BB, linewidth=0.7, alpha=0.5, linestyle="--")
-    # MA60
-    if ma60 is not None and np.isfinite(ma60).any():
-        ax1.plot(x, ma60, color=C_MA60, linewidth=1.1, label="MA60")
+    # 布林带 + MA20 (全量历史, 与其他周期统一)
+    _draw_bb(ax1, c_full, x, period=20, std=2.0)
 
     # 1h 关键位: 支撑绿 / 阻力红, 浅色 band 区域 + 清晰中线 + 价格标签
     if levels:
@@ -433,41 +463,6 @@ def make_chart(
     vol_colors = [C_UP if c[i] >= o[i] else C_DOWN for i in range(len(df))]
     ax2.bar(x, v, color=vol_colors, width=width, alpha=0.7)
     ax2.set_ylabel("Vol", color=C_TEXT, fontsize=8)
-
-    # 辅助: 在面板上画布林带 + MA20 — 用全量历史计算, 只取尾部显示
-    # close_full: 全量 close 序列 (未截断); x_arr: 面板 x 坐标 (长度 = 显示根数)
-    def _draw_bb(ax, close_full, x_arr, period=20, std=2.0, n_show=None):
-        n_show = n_show or len(x_arr)
-        cs = pd.Series(close_full, dtype=float)
-        sma = cs.rolling(period, min_periods=period).mean()
-        sd = cs.rolling(period, min_periods=period).std(ddof=0)
-        up = sma + std * sd
-        lo = sma - std * sd
-        ma20 = cs.rolling(20, min_periods=20).mean()
-        # 取尾部 n_show 根 (与面板显示对齐)
-        sma, up, lo, ma20 = (s.tail(n_show).to_numpy(float)
-                             for s in (sma, up, lo, ma20))
-        ax.fill_between(x_arr, up, lo, color=C_BB, alpha=0.10, zorder=1)
-        ax.plot(x_arr, sma, color=C_BB, linewidth=0.8, alpha=0.65)
-        ax.plot(x_arr, up, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
-        ax.plot(x_arr, lo, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
-        # MA20 (橙)
-        ax.plot(x_arr, ma20, color="#d08770", linewidth=1.0, alpha=0.85)
-
-    # 辅助: 画大周期参考位 (虚线 + 标签)
-    def _draw_extra(ax, x_last, extra_list, label=""):
-        for lv in (extra_list or []):
-            if not isinstance(lv, dict):
-                continue
-            px_e = lv["price"]
-            col_e = C_SUP if lv.get("side") == "support" else C_RES
-            ax.axhline(px_e, color=col_e, linewidth=0.9, alpha=0.5,
-                       linestyle="--", zorder=1.5)
-            ax.text(x_last, px_e, f"  {label}{px_e:.0f}",
-                    color=col_e, fontsize=7, va="center", ha="right",
-                    alpha=0.9,
-                    bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
-                              edgecolor=col_e, linewidth=0.3, alpha=0.7))
 
     # ── 左: 15M 短线面板 (最近 n_bars 根 ≈ 12小时) ──
     if ax15 is not None and df_15m is not None:
