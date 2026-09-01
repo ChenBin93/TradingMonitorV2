@@ -572,7 +572,8 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
                         item: dict | None = None, tf: str = "1h"):
     """为预警标的生成 K线图并推送飞书 (失败静默, 不影响主流程)
 
-    图表内容: 1h K线 + BB20 + MA60 + 关键位 + 预警级别标注
+    图表内容: 顶部信息栏 (4H方向/日线一致性/统计状态/关键位距离)
+             + 1h K线 + BB + MA60 + 1h/4h 关键位 + 预警标注 + 成交量
     """
     try:
         df = cache.get_df(sym, tf)
@@ -585,9 +586,40 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
         if "timestamp" in d.columns:
             d = d.sort_values("timestamp").reset_index(drop=True)
         atr = _atr_series(d)
-        levels = [lv["price"] for lv in detect_levels(d, atr)][:6]
+        levels = detect_levels(d, atr)
         bb = bollinger_bands(d)
         ma60 = d["close"].rolling(60, min_periods=60).mean()
+
+        # ── 4H 关键位 (虚线, 大方向参考) ──
+        levels_4h = []
+        try:
+            df4 = cache.get_df(sym, "4h")
+            if df4 is not None and len(df4) >= 60:
+                d4 = df4.copy()
+                if "timestamp" in d4.columns:
+                    d4 = d4.sort_values("timestamp").reset_index(drop=True)
+                atr4 = _atr_series(d4)
+                levels_4h = [lv["price"] for lv in detect_levels(d4, atr4)][:4]
+        except Exception:
+            pass
+
+        # ── 顶部信息栏 (来自 do_scan 的 item) ──
+        info = {}
+        dow = (item or {}).get("dow") or {}
+        dd = (item or {}).get("dow_daily") or {}
+        stats = (item or {}).get("stats") or {}
+        dists = (item or {}).get("dists") or {}
+        info["dow4h"] = dow.get("seg_dir", "")
+        info["dow4h_age"] = dow.get("seg_age")
+        info["dow_daily"] = dd.get("seg_dir", "")
+        info["cons"] = (item or {}).get("cons", "")
+        st = stats.get("4h") or stats.get("1h") or {}
+        info["stat"] = st.get("label", "")
+        d4h = dists.get("4h") or {}
+        d1h = dists.get("1h") or {}
+        info["dist4h"] = f"{d4h.get('sup_dist_atr', '')}/{d4h.get('res_dist_atr', '')}"
+        info["dist1h"] = f"{d1h.get('sup_dist_atr', '')}/{d1h.get('res_dist_atr', '')}"
+
         # 预警标注 (从 item 取最高级别)
         alerts = []
         warns = (item or {}).get("warns") or []
@@ -598,7 +630,14 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
                 "level": top.get("level", "L2"),
                 "text": f"{top.get('desc', '')[:18]}",
             })
-        path = make_chart(d, sym, tf, levels=levels, alerts=alerts, bb=bb, ma60=ma60)
+
+        # 关键位标注: 1h 支撑/阻力分色 + 价格标签
+        levels_1h = []
+        for lv in levels[:6]:
+            levels_1h.append({"price": lv["price"], "side": lv["side"],
+                              "touch": lv.get("touch", 0)})
+        path = make_chart(d, sym, tf, levels=levels_1h, levels_4h=levels_4h,
+                          alerts=alerts, bb=bb, ma60=ma60, info=info)
         if path:
             feishu.send_image(path, caption=f"📊 {sym} {tf} 预警图")
     except Exception as e:

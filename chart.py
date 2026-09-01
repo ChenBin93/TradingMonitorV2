@@ -2,7 +2,8 @@
 """K线图表生成 — 供飞书预警图片推送
 
 设计:
-- 上图: K线 + BB40±2σ + MA60 + 关键位水平线 + 预警标注 (L1/L2/L3)
+- 顶部信息栏: 4H 大方向/段龄 + 日线一致性 + 统计状态 + 4H/1H 距关键位距离
+- 上图: K线 + BB40±2σ + MA60 + 1h 关键位 (支撑/阻力分色+价格) + 4h 关键位 (虚线) + 预警标注
 - 下图: 成交量 (颜色随涨跌)
 - 输出: /tmp/charts/{symbol}_{tf}.png (或指定目录)
 
@@ -14,34 +15,41 @@ import numpy as np
 import pandas as pd
 
 # 颜色 (飞书深色背景友好)
-C_UP = "#e15241"    # 涨 (红, 国内习惯)
-C_DOWN = "#2db25d"  # 跌 (绿)
-C_BB = "#8a8f99"    # 布林带
-C_MA60 = "#e6a23c"  # MA60
-C_LEVEL = "#5a5f6b"  # 关键位
+C_UP = "#e15241"      # 涨 (红, 国内习惯)
+C_DOWN = "#2db25d"    # 跌 (绿)
+C_BB = "#8a8f99"      # 布林带
+C_MA60 = "#e6a23c"    # MA60
+C_SUP = "#2db25d"     # 支撑 (绿)
+C_RES = "#e15241"     # 阻力 (红)
+C_LEVEL = "#5a5f6b"   # 4h 关键位 (灰)
 C_GRID = "#2a2e37"
 C_BG = "#1e222d"
 C_TEXT = "#d8dce6"
+C_DIM = "#7a8194"     # 次要文字
 
 
 def make_chart(
     df: pd.DataFrame,
     symbol: str,
     tf: str,
-    levels: list[float] | None = None,
+    levels: list | None = None,
+    levels_4h: list[float] | None = None,
     alerts: list[dict] | None = None,
     bb: tuple | None = None,
     ma60: pd.Series | None = None,
+    info: dict | None = None,
     out_dir: str = "/tmp/charts",
     n_bars: int = 120,
 ) -> str:
     """生成K线图 → 返回 PNG 路径
 
     df: DataFrame (DatetimeIndex 或 timestamp 列, 含 ohlcv)
-    levels: 关键位价格列表 (画水平线)
+    levels: 1h 关键位, [{"price", "side": support/resistance, "touch"}]
+    levels_4h: 4h 关键位价格列表 (画虚线)
     alerts: [{price, level: 'L1'/'L2'/'L3', text}] 预警标注
     bb: (ma, upper, lower) 布林带三序列
     ma60: MA60 序列
+    info: 顶部信息栏 dict (dow4h/dow4h_age/dow_daily/cons/stat/dist4h/dist1h)
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -109,11 +117,14 @@ def make_chart(
     fname = f"{symbol.replace('/', '_').replace(':', '_')}_{tf}.png"
     path = os.path.join(out_dir, fname)
 
-    fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(12, 6.5), sharex=True,
-        gridspec_kw={"height_ratios": [3.2, 1], "hspace": 0.08},
-    )
-    fig.patch.set_facecolor(C_BG)
+    # 布局: 信息栏(0) + 主图(1) + 成交量(2)
+    fig = plt.figure(figsize=(12, 7.2), facecolor=C_BG)
+    gs = fig.add_gridspec(3, 1, height_ratios=[0.9, 3.2, 1], hspace=0.10,
+                          left=0.06, right=0.98, top=0.93, bottom=0.07)
+    ax0 = fig.add_subplot(gs[0])
+    ax1 = fig.add_subplot(gs[1], sharex=ax0)
+    ax2 = fig.add_subplot(gs[2], sharex=ax0)
+    ax0.axis("off")
     for ax in (ax1, ax2):
         ax.set_facecolor(C_BG)
         ax.grid(True, color=C_GRID, linewidth=0.6, alpha=0.6)
@@ -121,7 +132,30 @@ def make_chart(
         for spine in ax.spines.values():
             spine.set_color(C_GRID)
 
-    # ── 上图: K线 ──
+    # ── 顶部信息栏: 4H方向 / 日线一致性 / 统计状态 / 关键位距离 ──
+    if info:
+        def _seg_arrow(d):
+            return {"up": "↑ 多头", "down": "↓ 空头"}.get(d, "— 震荡")
+        seg4 = _seg_arrow(info.get("dow4h"))
+        age4 = info.get("dow4h_age")
+        seg4_s = f"{seg4}" + (f" {age4}根" if age4 else "")
+        daily_s = {"顺风": "日线顺风", "逆风": "日线逆风", "单边": "日线单边",
+                   "无风": "日线无风"}.get(info.get("cons"), "")
+        stat_s = info.get("stat", "")
+        d4 = str(info.get("dist4h", ""))
+        d1 = str(info.get("dist1h", ""))
+        line1 = (f"4H方向: {seg4_s}   |   {daily_s}   |   1H状态: {stat_s}")
+        line2 = (f"距关键位(支撑/阻力 ATR): 4H [{d4}]   1H [{d1}]")
+        ax0.text(0.005, 0.72, line1, transform=ax0.transAxes,
+                 fontsize=10, color=C_TEXT, va="center",
+                 bbox=dict(boxstyle="round,pad=0.35", facecolor="#262b38",
+                           edgecolor=C_GRID, linewidth=0.6))
+        ax0.text(0.005, 0.16, line2, transform=ax0.transAxes,
+                 fontsize=9, color=C_DIM, va="center",
+                 bbox=dict(boxstyle="round,pad=0.35", facecolor="#262b38",
+                           edgecolor=C_GRID, linewidth=0.6))
+
+    # ── 主图: K线 ──
     x = np.arange(len(df))
     width = 0.65
     for i in range(len(df)):
@@ -133,17 +167,31 @@ def make_chart(
 
     # 布林带 (ma/up/lo_ 已统一为 numpy)
     ax1.fill_between(x, up, lo_, color=C_BB, alpha=0.12, zorder=1)
-    ax1.plot(x, ma, color=C_BB, linewidth=0.9, alpha=0.7, label=f"BB40")
+    ax1.plot(x, ma, color=C_BB, linewidth=0.9, alpha=0.7, label="BB40")
     ax1.plot(x, up, color=C_BB, linewidth=0.7, alpha=0.5, linestyle="--")
     ax1.plot(x, lo_, color=C_BB, linewidth=0.7, alpha=0.5, linestyle="--")
     # MA60
     if ma60 is not None and np.isfinite(ma60).any():
         ax1.plot(x, ma60, color=C_MA60, linewidth=1.1, label="MA60")
 
-    # 关键位水平线
+    # 1h 关键位: 支撑绿 / 阻力红, 带价格标签
     if levels:
+        y_lo, y_hi = ax1.get_ylim()
         for lv in levels:
-            ax1.axhline(lv, color=C_LEVEL, linewidth=0.8, alpha=0.5, linestyle=":")
+            if isinstance(lv, dict):
+                px = lv["price"]
+                side = lv.get("side", "")
+                col = C_SUP if side == "support" else C_RES if side == "resistance" else C_LEVEL
+                ax1.axhline(px, color=col, linewidth=0.9, alpha=0.55, linestyle="-")
+                ax1.text(len(df) - 1, px, f" {px:.0f}",
+                         color=col, fontsize=7.5, va="bottom", ha="right",
+                         alpha=0.9)
+            else:
+                ax1.axhline(lv, color=C_LEVEL, linewidth=0.8, alpha=0.5, linestyle=":")
+    # 4h 关键位: 灰色虚线
+    if levels_4h:
+        for px in levels_4h:
+            ax1.axhline(px, color=C_LEVEL, linewidth=0.7, alpha=0.4, linestyle="--")
 
     # 预警标注
     if alerts:
@@ -194,8 +242,15 @@ def quick_test():
     idx = pd.date_range("2026-08-01", periods=n, freq="5min", tz="UTC")
     df = pd.DataFrame({"open": open_, "high": high, "low": low,
                        "close": close, "volume": vol}, index=idx)
-    path = make_chart(df, "TEST/USDT", "5m", levels=[98, 102],
-                      alerts=[{"price": 97.5, "level": "L2", "text": "关键位触及"}])
+    path = make_chart(
+        df, "TEST/USDT", "5m",
+        levels=[{"price": 98.5, "side": "support", "touch": 3},
+                {"price": 101.8, "side": "resistance", "touch": 2}],
+        levels_4h=[97.2, 103.0],
+        alerts=[{"price": 97.5, "level": "L2", "text": "关键位触及 L2"}],
+        info={"dow4h": "up", "dow4h_age": 23, "dow_daily": "up",
+              "cons": "顺风", "stat": "涨趋势·early",
+              "dist4h": "1.2/0.8", "dist1h": "0.5/1.4"})
     print(f"图表已生成: {path}")
 
 
