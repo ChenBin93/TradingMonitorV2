@@ -273,22 +273,23 @@ def make_chart(
     fname = f"{symbol.replace('/', '_').replace(':', '_')}_{tf}.png"
     path = os.path.join(out_dir, fname)
 
-    # 布局: 信息栏(0) + 1h主图(1) + 成交量(2) + [4h辅助面板(3)]
+    # ── 布局: 信息栏(整宽) + 左 1H主图/量 + 右 4H面板/量 (横向并排) ──
     has_4h = df_4h is not None and len(df_4h) >= 20
-    n_axes = 4 if has_4h else 3
-    ratios = [0.9, 3.2, 1] + ([1.1] if has_4h else [])
-    fig = plt.figure(figsize=(12, 8.2 if has_4h else 7.2), facecolor=C_BG)
-    gs = fig.add_gridspec(n_axes, 1, height_ratios=ratios, hspace=0.12,
-                          left=0.06, right=0.98, top=0.93, bottom=0.06)
-    ax0 = fig.add_subplot(gs[0])
-    ax1 = fig.add_subplot(gs[1], sharex=ax0)
-    ax2 = fig.add_subplot(gs[2], sharex=ax0)
+    fig = plt.figure(figsize=(13.5, 7.0), facecolor=C_BG)
+    gs = fig.add_gridspec(3, 2, height_ratios=[0.85, 3.2, 1],
+                          width_ratios=[1, 1] if has_4h else [1, 0],
+                          hspace=0.14, wspace=0.10,
+                          left=0.055, right=0.985, top=0.92, bottom=0.07)
+    ax0 = fig.add_subplot(gs[0, :])   # 信息栏 (整宽)
+    ax1 = fig.add_subplot(gs[1, 0])   # 左: 1H 主图
+    ax2 = fig.add_subplot(gs[2, 0])   # 左: 成交量
     ax0.axis("off")
     plot_axes = [ax1, ax2]
-    ax3 = None
+    ax3 = ax4 = None
     if has_4h:
-        ax3 = fig.add_subplot(gs[3], sharex=ax0)
-        plot_axes.append(ax3)
+        ax3 = fig.add_subplot(gs[1, 1])  # 右: 4H 面板 (独立 Y 轴, 各自适配)
+        ax4 = fig.add_subplot(gs[2, 1], sharex=ax3)
+        plot_axes += [ax3, ax4]
     for ax in plot_axes:
         ax.set_facecolor(C_BG)
         ax.grid(True, color=C_GRID, linewidth=0.6, alpha=0.6)
@@ -361,11 +362,17 @@ def make_chart(
                          alpha=0.95)
             else:
                 ax1.axhline(lv, color=C_LEVEL, linewidth=0.8, alpha=0.5, linestyle=":")
-    # 4h 关键位: 灰色虚线
-    if levels_4h:
-        for px in levels_4h:
-            ax1.axhline(px, color=C_LEVEL, linewidth=0.7, alpha=0.4, linestyle="--")
-
+    # 4H 关键位叠加到 1H 主图 (虚线, 大周期参考)
+    if levels_4h_chart:
+        for lv in levels_4h_chart:
+            if isinstance(lv, dict):
+                px4 = lv["price"]
+                col4 = C_SUP if lv.get("side") == "support" else C_RES
+                ax1.axhline(px4, color=col4, linewidth=0.9, alpha=0.45,
+                            linestyle="--", zorder=1.5)
+                ax1.text(len(df) - 1, px4, f" 4H:{px4:.0f}",
+                         color=col4, fontsize=6.5, va="bottom", ha="right",
+                         alpha=0.8)
     # 预警标注
     if alerts:
         for a in alerts:
@@ -391,7 +398,7 @@ def make_chart(
     ax2.bar(x, v, color=vol_colors, width=width, alpha=0.7)
     ax2.set_ylabel("Vol", color=C_TEXT, fontsize=8)
 
-    # ── 4H 辅助面板 (大周期, 最近 n_bars 根) ──
+    # ── 右: 4H 大周期面板 (横向并排, 同 Y 轴) ──
     if ax3 is not None and df_4h is not None:
         d4 = df_4h.copy()
         if "timestamp" in d4.columns:
@@ -401,6 +408,7 @@ def make_chart(
         h4 = d4["high"].to_numpy(float)
         l4 = d4["low"].to_numpy(float)
         c4 = d4["close"].to_numpy(float)
+        v4 = d4["volume"].to_numpy(float) if "volume" in d4.columns else np.ones(len(d4))
         x4 = np.arange(len(d4))
         w4 = 0.65
         for i in range(len(d4)):
@@ -420,16 +428,23 @@ def make_chart(
                 ax3.axhline(px4, color=col4, linewidth=0.8, alpha=0.7)
             else:
                 ax3.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
-        # 当前价参考线
         ax3.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
         ax3.set_title(f"4H 大周期 (最近 {len(d4)} 根)", color=C_DIM, fontsize=9, loc="left")
         ax3.set_ylabel("4H", color=C_TEXT, fontsize=8)
+        # 4H 成交量
+        vol4 = [C_UP if c4[i] >= o4[i] else C_DOWN for i in range(len(d4))]
+        ax4.bar(x4, v4, color=vol4, width=w4, alpha=0.7)
+        ax4.set_ylabel("Vol", color=C_TEXT, fontsize=8)
+        # 4H 时间轴
+        ax4.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+        ax4.xaxis.set_major_locator(mdates.AutoDateLocator())
+        for lbl in ax4.get_xticklabels():
+            lbl.set_rotation = 0
 
-    # X轴时间
-    last_ax = ax3 if ax3 is not None else ax2
-    last_ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
-    last_ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-    for lbl in last_ax.get_xticklabels():
+    # X轴时间 (左 1H)
+    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+    ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
+    for lbl in ax2.get_xticklabels():
         lbl.set_rotation = 0
 
     fig.savefig(path, dpi=110, bbox_inches="tight", facecolor=C_BG)
