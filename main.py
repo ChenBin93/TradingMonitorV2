@@ -650,11 +650,14 @@ def _send_warning_chart(cache: KlineCache, sym: str,
         info["dow_daily"] = dd.get("seg_dir", "")
         info["cons"] = (item or {}).get("cons", "")
         st = stats.get("4h") or stats.get("1h") or {}
-        info["stat"] = st.get("label", "")
-        d4h = dists.get("4h") or {}
-        d1h = dists.get("1h") or {}
-        info["dist4h"] = f"{d4h.get('sup_dist_atr', '')}/{d4h.get('res_dist_atr', '')}"
-        info["dist1h"] = f"{d1h.get('sup_dist_atr', '')}/{d1h.get('res_dist_atr', '')}"
+        info["stat"] = st.get("label", "") if isinstance(st, dict) else ""
+        # dists 兼容 float (do_scan 存 ATR 距离数字) 和 dict (旧结构)
+        def _dist_str(v):
+            if isinstance(v, dict):
+                return f"{v.get('sup_dist_atr', '')}/{v.get('res_dist_atr', '')}"
+            return str(v) if v is not None else ""
+        info["dist4h"] = _dist_str(dists.get("4h"))
+        info["dist1h"] = _dist_str(dists.get("1h"))
 
         # ── 开仓比例 (ATR 自适应仓位): 本金开仓比例 = 价格×风险%/(ATR×杠杆) ──
         try:
