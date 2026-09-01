@@ -14,6 +14,7 @@ from okx import OKXClient, KlineCache, Candle
 from indicators import compute as compute_indicators
 from signals import SIGNALS, SignalState, get_direction, get_regime, is_compressing, check_warnings, check_brewing
 from notify import Feishu
+from chart import make_chart
 from utils import setup_logging, start_health_server, fmt_price
 from support_resistance import find_swing_levels, find_recent_extremes, get_nearest_levels
 from volume_profile import compute_volume_profile, get_nearest_nodes
@@ -565,6 +566,43 @@ def get_symbols(okx: OKXClient, config: dict) -> list[str]:
     if watchlist:
         return watchlist
     return okx.get_top_symbols(config.get("top_n", 20))
+
+
+def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
+                        item: dict | None = None, tf: str = "1h"):
+    """为预警标的生成 K线图并推送飞书 (失败静默, 不影响主流程)
+
+    图表内容: 1h K线 + BB20 + MA60 + 关键位 + 预警级别标注
+    """
+    try:
+        df = cache.get_df(sym, tf)
+        if df is None or len(df) < 60:
+            logger.warning(f"Chart {sym}: {tf} 数据不足")
+            return
+        from market_phase import _atr_series
+        from key_levels import detect_levels, bollinger_bands
+        d = df.copy()
+        if "timestamp" in d.columns:
+            d = d.sort_values("timestamp").reset_index(drop=True)
+        atr = _atr_series(d)
+        levels = [lv["price"] for lv in detect_levels(d, atr)][:6]
+        bb = bollinger_bands(d)
+        ma60 = d["close"].rolling(60, min_periods=60).mean()
+        # 预警标注 (从 item 取最高级别)
+        alerts = []
+        warns = (item or {}).get("warns") or []
+        if warns:
+            top = max(warns, key=lambda w: w.get("level", "L1"))
+            alerts.append({
+                "price": float(d["close"].iloc[-1]),
+                "level": top.get("level", "L2"),
+                "text": f"{top.get('desc', '')[:18]}",
+            })
+        path = make_chart(d, sym, tf, levels=levels, alerts=alerts, bb=bb, ma60=ma60)
+        if path:
+            feishu.send_image(path, caption=f"📊 {sym} {tf} 预警图")
+    except Exception as e:
+        logger.warning(f"Chart {sym} failed: {e}")
 
 
 def do_scan(
@@ -1626,6 +1664,28 @@ async def async_main():
                             lines_out.append(f"  {sym_short} 状态: {_stat_line(item)}")
                 push_text = "\n".join(lines_out)
                 feishu.send(push_text)
+
+                # ── 图表推送 (可选): 最高级别预警配 K线图 ──
+                # 配置: config.yaml -> feishu_image: {enabled, max_per_scan, min_level}
+                try:
+                    img_cfg = config.get("feishu_image", {})
+                    if img_cfg.get("enabled", False):
+                        min_level = img_cfg.get("min_level", "L3")
+                        max_charts = int(img_cfg.get("max_per_scan", 2))
+                        # 按级别排序取最严重的标的 (L3 > L2 > L1)
+                        chart_syms: list[str] = []
+                        for _, sym_short, w, _dow, _pr in sorted(
+                                ranked, key=lambda x: x[0]):
+                            if w["level"] < min_level or len(chart_syms) >= max_charts:
+                                continue
+                            full = next((s for s, it in warnings.items()
+                                         if it.get("_short") == sym_short), None)
+                            if full and full not in chart_syms:
+                                chart_syms.append(full)
+                        for full in chart_syms:
+                            _send_warning_chart(feishu, cache, full, warnings.get(full, {}))
+                except Exception as e:
+                    logger.warning(f"Chart push failed: {e}")
                 diag_lines = []
                 for sym, item in warnings.items():
                     d = item.get("diag") or {}
