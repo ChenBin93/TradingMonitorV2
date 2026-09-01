@@ -594,6 +594,34 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
         bb = bollinger_bands(d)
         ma60 = d["close"].rolling(60, min_periods=60).mean()
 
+        # ── 15M 短线面板 (优先 cache 15m, 否则 5m 聚合) ──
+        df15_raw = None
+        levels_15m_chart = []
+        try:
+            df15_raw = cache.get_df(sym, "15m")
+            if df15_raw is None or len(df15_raw) < 60:
+                # 5m → 15m 聚合 (3根5m = 1根15m, 已收盘对齐)
+                df5 = cache.get_df(sym, "5m")
+                if df5 is not None and len(df5) >= 180:
+                    d5 = df5.copy()
+                    if "timestamp" in d5.columns:
+                        d5 = d5.set_index("timestamp")
+                    d5 = d5.sort_index()
+                    df15_raw = d5.resample("15min").agg({
+                        "open": "first", "high": "max", "low": "min",
+                        "close": "last", "volume": "sum",
+                    }).dropna(subset=["close"]).reset_index()
+            if df15_raw is not None and len(df15_raw) >= 60:
+                d15 = df15_raw.copy()
+                if "timestamp" in d15.columns:
+                    d15 = d15.sort_values("timestamp").reset_index(drop=True)
+                atr15 = _atr_series(d15)
+                atr15_now = float(atr15[-1]) or 1.0
+                levels_15m_chart = fused_levels(d15, price_now, atr15_now,
+                                                max_dist_pct=0.04, max_each_side=2)
+        except Exception:
+            pass
+
         # ── 4H 大周期 (辅助面板 + 关键位) ──
         df4_raw = None
         levels_4h_chart = []
@@ -638,9 +666,10 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
                 "text": f"{top.get('desc', '')[:18]}",
             })
 
-        # 关键位标注: 1h 支撑/阻力 (带 band) + 4H 辅助面板
+        # 关键位标注: 1h 支撑/阻力 (带 band) + 15M/4H 辅助面板
         path = make_chart(d, sym, tf, levels=levels,
                           alerts=alerts, bb=bb, ma60=ma60, info=info,
+                          df_15m=df15_raw, levels_15m_chart=levels_15m_chart,
                           df_4h=df4_raw, levels_4h_chart=levels_4h_chart)
         if path:
             feishu.send_image(path, caption=f"📊 {sym} {tf} 预警图")

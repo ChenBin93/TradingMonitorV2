@@ -190,21 +190,25 @@ def make_chart(
     info: dict | None = None,
     df_4h: pd.DataFrame | None = None,
     levels_4h_chart: list | None = None,
+    df_15m: pd.DataFrame | None = None,
+    levels_15m_chart: list | None = None,
     out_dir: str = "/tmp/charts",
     n_bars: int = 48,
 ) -> str:
     """生成K线图 → 返回 PNG 路径
 
     df: DataFrame (DatetimeIndex 或 timestamp 列, 含 ohlcv) — 主图 1h
-    levels: 1h 关键位, [{"price", "side": support/resistance, "band", "touch"}]
-    levels_4h: 4h 关键位价格列表 (画虚线, 兼容旧调用)
-    alerts: [{price, level: 'L1'/'L2'/'L3', text}] 预警标注
+    levels: 1h 关键位, [{"price", "side", "band", "touch"}]
+    levels_4h: 4h 关键位价格列表 (兼容旧调用, 已弃用)
+    alerts: [{price, level, text}] 预警标注
     bb: (ma, upper, lower) 布林带三序列
     ma60: MA60 序列
-    info: 顶部信息栏 dict (dow4h/dow4h_age/dow_daily/cons/stat/dist4h/dist1h)
-    df_4h: 4h K线数据 (画底部大周期辅助面板, 最近 n_bars 根)
-    levels_4h_chart: 4h 关键位 dict 列表 (带 band, 画在 4h 面板)
-    n_bars: 主图显示根数 (默认 48 ≈ 2天 1h, 敏感区)
+    info: 顶部信息栏 dict
+    df_4h: 4h K线 (右面板)
+    levels_4h_chart: 4h 关键位 dict 列表 (带 band)
+    df_15m: 15m K线 (最左面板)
+    levels_15m_chart: 15m 关键位 dict 列表
+    n_bars: 每面板显示根数 (默认 48)
     """
     import matplotlib
     matplotlib.use("Agg")
@@ -273,22 +277,35 @@ def make_chart(
     fname = f"{symbol.replace('/', '_').replace(':', '_')}_{tf}.png"
     path = os.path.join(out_dir, fname)
 
-    # ── 布局: 信息栏(整宽) + 左 1H主图/量 + 右 4H面板/量 (横向并排) ──
+    # ── 布局: 信息栏(整宽) + 15M/1H/4H 三面板横向并排 ──
+    has_15m = df_15m is not None and len(df_15m) >= 20
     has_4h = df_4h is not None and len(df_4h) >= 20
-    fig = plt.figure(figsize=(13.5, 7.0), facecolor=C_BG)
-    gs = fig.add_gridspec(3, 2, height_ratios=[0.85, 3.2, 1],
-                          width_ratios=[1, 1] if has_4h else [1, 0],
-                          hspace=0.14, wspace=0.10,
-                          left=0.055, right=0.985, top=0.92, bottom=0.07)
+    n_col = 1 + int(has_15m) + int(has_4h)
+    wratios = [1] * n_col
+    fig = plt.figure(figsize=(6.8 * n_col, 6.6), facecolor=C_BG)
+    gs = fig.add_gridspec(3, n_col, height_ratios=[0.85, 3.2, 1],
+                          width_ratios=wratios,
+                          hspace=0.14, wspace=0.12,
+                          left=0.05, right=0.985, top=0.92, bottom=0.08)
     ax0 = fig.add_subplot(gs[0, :])   # 信息栏 (整宽)
-    ax1 = fig.add_subplot(gs[1, 0])   # 左: 1H 主图
-    ax2 = fig.add_subplot(gs[2, 0])   # 左: 成交量
     ax0.axis("off")
-    plot_axes = [ax1, ax2]
+    plot_axes = []
+    ax15 = ax15v = None
+    ax1 = ax2 = None
     ax3 = ax4 = None
+    col = 0
+    if has_15m:
+        ax15 = fig.add_subplot(gs[1, col])    # 15M 价格
+        ax15v = fig.add_subplot(gs[2, col])   # 15M 量
+        plot_axes += [ax15, ax15v]
+        col += 1
+    ax1 = fig.add_subplot(gs[1, col])         # 1H 主图
+    ax2 = fig.add_subplot(gs[2, col])         # 1H 量
+    plot_axes += [ax1, ax2]
+    col += 1
     if has_4h:
-        ax3 = fig.add_subplot(gs[1, 1])  # 右: 4H 面板 (独立 Y 轴, 各自适配)
-        ax4 = fig.add_subplot(gs[2, 1], sharex=ax3)
+        ax3 = fig.add_subplot(gs[1, col])     # 4H 价格
+        ax4 = fig.add_subplot(gs[2, col])     # 4H 量
         plot_axes += [ax3, ax4]
     for ax in plot_axes:
         ax.set_facecolor(C_BG)
@@ -320,9 +337,13 @@ def make_chart(
                  bbox=dict(boxstyle="round,pad=0.35", facecolor="#262b38",
                            edgecolor=C_GRID, linewidth=0.6))
 
-    # ── 主图: K线 ──
-    x = np.arange(len(df))
+    # ── 主图: K线 (时间戳 x 轴, 保证时间轴真实) ──
+    x = mdates.date2num(idx.to_pydatetime()) if hasattr(idx, "to_pydatetime") else np.arange(len(df))
     width = 0.65
+    # 时间轴跨度 (日) → K线宽度 (避免 1H 图宽线重叠)
+    if len(x) > 1 and hasattr(idx, "to_pydatetime"):
+        span_days = (x[-1] - x[0])
+        width = max(0.3, min(0.7, span_days / len(x) * 0.8))
     for i in range(len(df)):
         color = C_UP if c[i] >= o[i] else C_DOWN
         ax1.plot([x[i], x[i]], [l[i], h[i]], color=color, linewidth=0.8, zorder=2)
@@ -357,7 +378,7 @@ def make_chart(
                                 linestyle=":")
                 # 中线 = 真实极值 (影线端)
                 ax1.axhline(px, color=col, linewidth=1.0, alpha=0.75, linestyle="-")
-                ax1.text(len(df) - 1, px, f" {px:.0f}",
+                ax1.text(x[-1], px, f" {px:.0f}",
                          color=col, fontsize=7.5, va="bottom", ha="right",
                          alpha=0.95)
             else:
@@ -370,20 +391,20 @@ def make_chart(
                 col4 = C_SUP if lv.get("side") == "support" else C_RES
                 ax1.axhline(px4, color=col4, linewidth=0.9, alpha=0.45,
                             linestyle="--", zorder=1.5)
-                ax1.text(len(df) - 1, px4, f" 4H:{px4:.0f}",
+                ax1.text(x[-1], px4, f" 4H:{px4:.0f}",
                          color=col4, fontsize=6.5, va="bottom", ha="right",
                          alpha=0.8)
     # 预警标注
     if alerts:
         for a in alerts:
-            ax1.scatter([len(df) - 1], [a.get("price", c[-1])],
+            ax1.scatter([x[-1]], [a.get("price", c[-1])],
                         marker="v" if a.get("level", "L2") == "L3" else "o",
                         s=90 if a.get("level") == "L3" else 60,
                         color={"L1": "#5a9cf8", "L2": "#e6a23c", "L3": "#e15241"}
                         .get(a.get("level"), "#e6a23c"),
                         zorder=5, edgecolor="white", linewidth=0.6)
             ax1.annotate(
-                a.get("text", ""), (len(df) - 1, a.get("price", c[-1])),
+                a.get("text", ""), (x[-1], a.get("price", c[-1])),
                 textcoords="offset points", xytext=(8, -10), fontsize=8,
                 color=C_TEXT, zorder=6)
 
@@ -398,7 +419,51 @@ def make_chart(
     ax2.bar(x, v, color=vol_colors, width=width, alpha=0.7)
     ax2.set_ylabel("Vol", color=C_TEXT, fontsize=8)
 
-    # ── 右: 4H 大周期面板 (横向并排, 同 Y 轴) ──
+    # ── 左: 15M 短线面板 (最近 n_bars 根 ≈ 12小时) ──
+    if ax15 is not None and df_15m is not None:
+        d15 = df_15m.copy()
+        if "timestamp" in d15.columns:
+            d15 = d15.set_index("timestamp")
+        d15 = d15.sort_index().tail(n_bars)
+        o15 = d15["open"].to_numpy(float)
+        h15 = d15["high"].to_numpy(float)
+        l15 = d15["low"].to_numpy(float)
+        c15 = d15["close"].to_numpy(float)
+        v15 = d15["volume"].to_numpy(float) if "volume" in d15.columns else np.ones(len(d15))
+        x15 = mdates.date2num(d15.index.to_pydatetime()) if hasattr(d15.index, "to_pydatetime") else np.arange(len(d15))
+        w15 = 0.65
+        if len(x15) > 1 and hasattr(d15.index, "to_pydatetime"):
+            w15 = max(0.25, min(0.7, (x15[-1] - x15[0]) / len(d15) * 0.8))
+        for i in range(len(d15)):
+            col15 = C_UP if c15[i] >= o15[i] else C_DOWN
+            ax15.plot([x15[i], x15[i]], [l15[i], h15[i]], color=col15, linewidth=0.6)
+            ax15.add_patch(Rectangle(
+                (x15[i] - w15 / 2, min(o15[i], c15[i])), w15,
+                abs(c15[i] - o15[i]) or 1e-6,
+                facecolor=col15, edgecolor=col15, linewidth=0.35))
+        # 15M 关键位 (带 band)
+        for lv in (levels_15m_chart or []):
+            if isinstance(lv, dict):
+                px15 = lv["price"]
+                b15 = lv.get("band") or 0.0
+                col15 = C_SUP if lv.get("side") == "support" else C_RES
+                if b15 > 0:
+                    ax15.axhspan(px15 - b15, px15 + b15, color=col15, alpha=0.10, linewidth=0)
+                ax15.axhline(px15, color=col15, linewidth=0.8, alpha=0.7)
+            else:
+                ax15.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
+        ax15.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
+        ax15.set_title(f"15M (最近 {len(d15)} 根)", color=C_DIM, fontsize=9, loc="left")
+        ax15.set_ylabel("15M", color=C_TEXT, fontsize=8)
+        vol15 = [C_UP if c15[i] >= o15[i] else C_DOWN for i in range(len(d15))]
+        ax15v.bar(x15, v15, color=vol15, width=w15, alpha=0.7)
+        ax15v.set_ylabel("Vol", color=C_TEXT, fontsize=8)
+        ax15v.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
+        ax15v.xaxis.set_major_locator(mdates.AutoDateLocator())
+        for lbl in ax15v.get_xticklabels():
+            lbl.set_rotation = 0
+
+    # ── 右: 4H 大周期面板 (横向并排) ──
     if ax3 is not None and df_4h is not None:
         d4 = df_4h.copy()
         if "timestamp" in d4.columns:
@@ -409,8 +474,10 @@ def make_chart(
         l4 = d4["low"].to_numpy(float)
         c4 = d4["close"].to_numpy(float)
         v4 = d4["volume"].to_numpy(float) if "volume" in d4.columns else np.ones(len(d4))
-        x4 = np.arange(len(d4))
+        x4 = mdates.date2num(d4.index.to_pydatetime()) if hasattr(d4.index, "to_pydatetime") else np.arange(len(d4))
         w4 = 0.65
+        if len(x4) > 1 and hasattr(d4.index, "to_pydatetime"):
+            w4 = max(0.3, min(0.7, (x4[-1] - x4[0]) / len(d4) * 0.8))
         for i in range(len(d4)):
             col4 = C_UP if c4[i] >= o4[i] else C_DOWN
             ax3.plot([x4[i], x4[i]], [l4[i], h4[i]], color=col4, linewidth=0.7)
