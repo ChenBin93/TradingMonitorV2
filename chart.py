@@ -349,6 +349,9 @@ def make_chart(
         d4 = str(info.get("dist4h", ""))
         d1 = str(info.get("dist1h", ""))
         line1 = (f"4H方向: {seg4_s}   |   {daily_s}   |   1H状态: {stat_s}")
+        score_s = info.get("score", "")
+        if score_s:
+            line1 = f"🔥 {score_s}   |   " + line1
         line2 = (f"距关键位(支撑/阻力 ATR): 4H [{d4}]   1H [{d1}]")
         pos_ref = info.get("pos_ref", "")
         if pos_ref:

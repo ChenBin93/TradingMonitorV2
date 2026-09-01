@@ -701,6 +701,14 @@ def _send_warning_chart(cache: KlineCache, sym: str,
         info["dist4h"] = _dist_str(dists.get("4h"))
         info["dist1h"] = _dist_str(dists.get("1h"))
 
+        # ── 机会分 (来自 do_scan 计算) ──
+        sc = (item or {}).get("score") or {}
+        if sc.get("score"):
+            parts = sc.get("parts", {})
+            info["score"] = (f"机会分 {sc['score']:.0f} "
+                             f"(事件{parts.get('event', 0):.0f}/贴位{parts.get('prox', 0):.0f}/"
+                             f"共振{parts.get('reso', 0):.0f}/趋势{parts.get('trend', 0):.0f})")
+
         # ── 开仓比例 (ATR 自适应仓位): 本金开仓比例 = 价格×风险%/(ATR×杠杆) ──
         try:
             rp = (config or {}).get("account", {}).get("risk_pct", 1)
@@ -789,6 +797,86 @@ def _send_warning_chart(cache: KlineCache, sym: str,
     except Exception as e:
         logger.warning(f"Chart {sym} failed: {e}")
     return None
+
+
+def _opportunity_score(item: dict) -> dict:
+    """机会分 (0-100) — 基于 do_scan 的实时字段, 无新增计算
+
+    公式: 事件强度×30% + 贴位×30% + 多周期共振×25% + 趋势顺风×15%
+    返回 {"score": float, "parts": {...}}
+    """
+    # 1) 事件强度: 触碰 > 突破 (机会在关键位, 突破已走一段)
+    warns = item.get("warns") or []
+    if not warns:
+        return {"score": 0.0, "parts": {}}
+    top = max(warns, key=lambda w: w.get("level", "L1"))
+    lvl = top.get("level", "L1")
+    wtype = top.get("type", "")
+    if lvl == "L2" and wtype == "触碰":
+        ev = 85.0
+    elif lvl == "L3":
+        ev = 70.0
+    elif lvl == "L2":
+        ev = 55.0
+    elif lvl == "L1" and wtype == "酝酿":
+        ev = 40.0
+    else:
+        ev = 30.0
+    # 预警数加成 (≥2 条同向预警 = 多信号)
+    if len(warns) >= 2:
+        ev = min(100.0, ev + 10)
+
+    # 2) 贴位: 用预警触发周期的 dist (最小距离)
+    top_tf = top.get("tf", "")
+    dists = item.get("dists") or {}
+    dist = None
+    if top_tf in dists:
+        dist = dists[top_tf]
+    else:
+        # 无匹配周期 → 取所有周期最小
+        vals = [v for v in dists.values() if isinstance(v, (int, float))]
+        dist = min(vals) if vals else None
+    if dist is None:
+        prox = 50.0  # 无数据 → 中性
+    else:
+        prox = max(0.0, 100.0 - float(dist) * 40.0)
+
+    # 3) 多周期共振: range 不计入 (按有效周期算)
+    dirs = []
+    for d in (item.get("dow_daily"), item.get("dow"), item.get("dow_h1")):
+        sd = (d or {}).get("seg_dir", "")
+        if sd in ("up", "down"):
+            dirs.append(sd)
+    n_eff = len(dirs)
+    if n_eff >= 3 and len(set(dirs)) == 1:
+        reso = 100.0
+    elif n_eff == 2 and len(set(dirs)) == 1:
+        reso = 100.0
+    elif n_eff >= 2 and len(set(dirs)) == 2:
+        reso = 60.0
+    elif n_eff == 1:
+        reso = 40.0
+    else:
+        reso = 20.0
+
+    # 4) 趋势顺风: cons + 段龄
+    cons = item.get("cons", "")
+    if cons == "顺风":
+        trend = 80.0
+    elif cons == "单边":
+        trend = 55.0
+    elif cons == "逆风":
+        trend = 30.0
+    else:
+        trend = 40.0
+    age = (item.get("dow") or {}).get("seg_age")
+    if age is not None and 5 <= age <= 40:
+        trend = min(100.0, trend + 10)
+
+    score = round(ev * 0.30 + prox * 0.30 + reso * 0.25 + trend * 0.15, 1)
+    return {"score": score,
+            "parts": {"event": round(ev, 1), "prox": round(prox, 1),
+                      "reso": round(reso, 1), "trend": round(trend, 1)}}
 
 
 def do_scan(
@@ -922,10 +1010,12 @@ def do_scan(
                     cons = "单边"
                 diag["日线"] = (f"daily_len={len(daily_df) if daily_df is not None else 0} "
                                f"dow={dow_daily.get('seg_dir', '?') if dow_daily else 'EMPTY'}")
-                warnings[sym] = {"warns": warns, "dow": dow4h,
-                                 "dow_daily": dow_daily, "dow_h1": dow_h1,
-                                 "stats": stats, "dists": dists, "cons": cons,
-                                 "diag": diag}
+                item = {"warns": warns, "dow": dow4h,
+                        "dow_daily": dow_daily, "dow_h1": dow_h1,
+                        "stats": stats, "dists": dists, "cons": cons,
+                        "diag": diag}
+                item["score"] = _opportunity_score(item)
+                warnings[sym] = item
         except Exception as e:
             logger.debug(f"scan warn error {sym}: {e}")
     return warnings
@@ -1856,12 +1946,13 @@ async def async_main():
                 blocks: list[dict] = []
                 chart_syms: list[str] = []
                 try:
-                    # 选图: 级别降序 (L3>L2>L1), 同级别内优先上轮未展示的标的
+                    # 选图: 机会分降序 (score), 同分内优先上轮未展示的标的
                     # (轮换避免固定品类), 每标的仅一张
                     max_charts = int(img_cfg.get("max_per_scan", 5))
                     min_level = img_cfg.get("min_level", "L1")
                     cand_syms: list[str] = []  # 全部有预警的标的 (去重)
                     sym_rank: dict = {}         # full -> 最高级别
+                    sym_score: dict = {}        # full -> 机会分
                     for _, sym_short, w, _dow, _pr in ranked:
                         full = next((s for s, it in warnings.items()
                                      if it.get("_short") == sym_short), None)
@@ -1869,12 +1960,14 @@ async def async_main():
                             continue
                         cand_syms.append(full)
                         sym_rank[full] = w["level"]
-                    # 排序: 级别降序, 同级别内上轮未展示的优先
+                        it = warnings.get(full, {})
+                        sym_score[full] = (it.get("score") or {}).get("score", 0.0)
+                    # 排序: 机会分降序, 同分内上轮未展示的优先
                     chart_syms = sorted(
                         cand_syms,
-                        key=lambda s: (sym_rank[s],
+                        key=lambda s: (sym_score[s],
                                        s in last_shown_syms),  # False 优先
-                        reverse=True)  # "L3" > "L1", False > True
+                        reverse=True)
                     chart_syms = [s for s in chart_syms
                                   if sym_rank[s] >= min_level][:max_charts]
                     for full in chart_syms:
@@ -1882,14 +1975,16 @@ async def async_main():
                                                 config=config)
                         if r:
                             short = full.replace("-USDT-SWAP", "/USDT").split(":")[0]
-                            # 每张图前加一行: 标的名 + 最高级别 + 状态摘要
+                            # 每张图前加一行: 分数徽章 + 标的名 + 最高级别 + 状态摘要
                             item = warnings.get(full, {})
+                            sc = (item.get("score") or {}).get("score", 0.0)
+                            badge = "🔥" if sc >= 75 else "⚡" if sc >= 45 else "📋"
                             top_w = max(item.get("warns") or [{"level": "L1"}],
                                         key=lambda x: x.get("level", "L1"))
                             icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(
                                 top_w.get("level", "L1"), "")
                             stat = (item.get("stats") or {}).get("1h") or {}
-                            lbl = f"{icon} {short}  {top_w.get('desc', '')}" \
+                            lbl = f"{badge}{sc:.0f} {icon} {short}  {top_w.get('desc', '')}" \
                                   + (f"  [{stat.get('label', '')}]" if stat.get("label") else "")
                             blocks.append({"text": lbl})
                             blocks.append({"image": r[1]})
