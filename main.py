@@ -662,6 +662,25 @@ def _send_warning_chart(cache: KlineCache, sym: str,
         except Exception:
             pass
 
+        # ── 每面板附加"距当前价最近的大周期位" (虚线参考) ──
+        # 规则: 每个面板只叠加比它大的周期里, 距当前价最近的一条位
+        def _nearest_bigger(levels_pool: list[dict], cur_price: float) -> list[dict]:
+            """从大周期位池中选距当前价最近的 1-2 条 (支撑/阻力各最近)"""
+            if not levels_pool:
+                return []
+            cand = [lv for lv in levels_pool
+                    if abs(lv.get("price", cur_price) - cur_price) < 0.10 * cur_price]
+            if not cand:
+                return []
+            best = min(cand, key=lambda lv: abs(lv["price"] - cur_price))
+            return [best]
+
+        # 各面板的大周期参考位 (1H 位存在 levels)
+        extra_15m = _nearest_bigger(levels + levels_4h_chart + levels_1d_chart, price_now)
+        extra_1h = _nearest_bigger(levels_4h_chart + levels_1d_chart, price_now)
+        extra_4h = _nearest_bigger(levels_1d_chart, price_now)
+        extra_1d = []  # 日线无更大周期
+
         # ── 顶部信息栏 (来自 do_scan 的 item) ──
         info = {}
         dow = (item or {}).get("dow") or {}
@@ -755,12 +774,16 @@ def _send_warning_chart(cache: KlineCache, sym: str,
                 "dist_atr": dist_atr,
             })
 
-        # 关键位标注: 1h 支撑/阻力 (带 band) + 日线/4H/15M 辅助面板
+        # 关键位标注: 本周期位 + 最近大周期位 (虚线)
         path = make_chart(d, sym, tf, levels=levels,
                           alerts=alerts, bb=bb, ma60=ma60, info=info,
                           df_1d=df1d_raw, levels_1d_chart=levels_1d_chart,
+                          extra_1d=extra_1d,
                           df_15m=df15_raw, levels_15m_chart=levels_15m_chart,
-                          df_4h=df4_raw, levels_4h_chart=levels_4h_chart)
+                          extra_15m=extra_15m,
+                          df_4h=df4_raw, levels_4h_chart=levels_4h_chart,
+                          extra_4h=extra_4h,
+                          extra_1h=extra_1h)
         if path:
             return sym, path
     except Exception as e:

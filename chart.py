@@ -193,6 +193,10 @@ def make_chart(
     levels_15m_chart: list | None = None,
     df_1d: pd.DataFrame | None = None,
     levels_1d_chart: list | None = None,
+    extra_1d: list | None = None,
+    extra_15m: list | None = None,
+    extra_4h: list | None = None,
+    extra_1h: list | None = None,
     out_dir: str = "/tmp/charts",
     n_bars: int = 48,
 ) -> str:
@@ -399,19 +403,19 @@ def make_chart(
                                    edgecolor=col, linewidth=0.4, alpha=0.8))
             else:
                 ax1.axhline(lv, color=C_LEVEL, linewidth=0.8, alpha=0.5, linestyle=":")
-    # 4H 关键位叠加到 1H 主图 (虚线, 大周期参考)
-    if levels_4h_chart:
-        for lv in levels_4h_chart:
+    # 1H 面板: 最近的大周期位 (虚线参考, 只叠加最近的 1-2 条)
+    if extra_1h:
+        for lv in extra_1h:
             if isinstance(lv, dict):
-                px4 = lv["price"]
-                col4 = C_SUP if lv.get("side") == "support" else C_RES
-                ax1.axhline(px4, color=col4, linewidth=0.9, alpha=0.5,
+                px_e = lv["price"]
+                col_e = C_SUP if lv.get("side") == "support" else C_RES
+                ax1.axhline(px_e, color=col_e, linewidth=0.9, alpha=0.5,
                             linestyle="--", zorder=1.5)
-                ax1.text(x[-1], px4, f"  4H {px4:.0f}",
-                         color=col4, fontsize=7, va="center", ha="right",
+                ax1.text(x[-1], px_e, f"  ↑{px_e:.0f}",
+                         color=col_e, fontsize=7, va="center", ha="right",
                          alpha=0.9,
                          bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
-                                   edgecolor=col4, linewidth=0.3, alpha=0.7))
+                                   edgecolor=col_e, linewidth=0.3, alpha=0.7))
     # 预警标注移动到所有面板渲染之后 (需 x4/x15 已定义)
 
     ax1.set_title(f"{symbol}  {tf}  (横轴: 距最新K线根数)",
@@ -449,6 +453,21 @@ def make_chart(
         ax.plot(x_arr, lo, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
         # MA20 (橙)
         ax.plot(x_arr, ma20, color="#d08770", linewidth=1.0, alpha=0.85)
+
+    # 辅助: 画大周期参考位 (虚线 + 标签)
+    def _draw_extra(ax, x_last, extra_list, label=""):
+        for lv in (extra_list or []):
+            if not isinstance(lv, dict):
+                continue
+            px_e = lv["price"]
+            col_e = C_SUP if lv.get("side") == "support" else C_RES
+            ax.axhline(px_e, color=col_e, linewidth=0.9, alpha=0.5,
+                       linestyle="--", zorder=1.5)
+            ax.text(x_last, px_e, f"  {label}{px_e:.0f}",
+                    color=col_e, fontsize=7, va="center", ha="right",
+                    alpha=0.9,
+                    bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
+                              edgecolor=col_e, linewidth=0.3, alpha=0.7))
 
     # ── 左: 15M 短线面板 (最近 n_bars 根 ≈ 12小时) ──
     if ax15 is not None and df_15m is not None:
@@ -491,6 +510,7 @@ def make_chart(
             else:
                 ax15.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
         ax15.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
+        _draw_extra(ax15, x15[-1], extra_15m, "↑")  # 最近大周期位参考
         ax15.set_title(f"15M (最近 {len(d15)} 根)", color=C_DIM, fontsize=9, loc="left")
         ax15.set_ylabel("15M", color=C_TEXT, fontsize=8)
         # K线图横轴 = 距最新 K 线的根数
@@ -547,6 +567,7 @@ def make_chart(
             else:
                 axd.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
         axd.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
+        _draw_extra(axd, xd[-1], extra_1d, "↑")  # 最近大周期位参考
         axd.set_title(f"日线 (最近 {len(dd)} 根)", color=C_DIM, fontsize=9, loc="left")
         axd.set_ylabel("1D", color=C_TEXT, fontsize=8)
         axd.xaxis.set_major_locator(mtick.MaxNLocator(6))
@@ -602,6 +623,7 @@ def make_chart(
             else:
                 ax3.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
         ax3.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
+        _draw_extra(ax3, x4[-1], extra_4h, "↑")  # 最近大周期位参考
         ax3.set_title(f"4H 大周期 (最近 {len(d4)} 根)", color=C_DIM, fontsize=9, loc="left")
         ax3.set_ylabel("4H", color=C_TEXT, fontsize=8)
         # K线图横轴 = 距最新 K 线的根数
