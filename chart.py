@@ -521,15 +521,20 @@ def make_chart(
     for lbl in ax2.get_xticklabels():
         lbl.set_rotation = 0
 
-    # 预警标注: 按 tf 分配到对应面板, 在面板右上角用文字标注 (不画K线标记)
+    # 预警标注: 按 tf 分配到对应面板, 在面板左上角用文字标注 (不画K线标记)
+    # 同面板多条预警纵向堆叠 (y 递减, 避免重叠)
+    alert_pos = {"4h": 0, "1h": 0, "15m": 0}
+
     def _draw_alert(ax, a):
-        # 右上角文字标注: 级别图标 + 描述
         icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(a.get("level", "L2"), "")
         color = {"L1": "#5a9cf8", "L2": "#e6a23c", "L3": "#e15241"} \
             .get(a.get("level", "L2"), "#e6a23c")
-        ax.text(0.985, 0.96, f"{icon} {a.get('text', '')}",
+        slot = alert_pos.get(a.get("tf", tf), 0)
+        alert_pos[a.get("tf", tf)] = slot + 1
+        y = 0.95 - slot * 0.07  # 每条下移 7%
+        ax.text(0.015, y, f"{icon} {a.get('text', '')}",
                 transform=ax.transAxes, fontsize=8, color=color,
-                ha="right", va="top", alpha=0.95,
+                ha="left", va="top", alpha=0.95,
                 bbox=dict(boxstyle="round,pad=0.25", facecolor="#262b38",
                           edgecolor=color, linewidth=0.5, alpha=0.85))
 

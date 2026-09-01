@@ -655,23 +655,66 @@ def _send_warning_chart(cache: KlineCache, sym: str,
         info["dist4h"] = f"{d4h.get('sup_dist_atr', '')}/{d4h.get('res_dist_atr', '')}"
         info["dist1h"] = f"{d1h.get('sup_dist_atr', '')}/{d1h.get('res_dist_atr', '')}"
 
-        # 预警标注: 全部 warns 按 tf 分配 (4H/1H/15M 面板各自标注)
+        # 预警标注: 全部 warns 按 tf 分配, 标注带具体点位 + ATR 距离
         alerts = []
         warns = (item or {}).get("warns") or []
+        # 预计算各周期 rel (支撑/阻力点位+距离) 和 bb (布林上下轨)
+        tf_ctx = {}
+        for w_tf, df_tf, _name in (("4h", df4_raw, "4H"),
+                                   ("1h", df, "1H"),
+                                   ("15m", df15_raw, "15M")):
+            if df_tf is None or len(df_tf) < 60:
+                continue
+            dd = df_tf.copy()
+            if "timestamp" in dd.columns:
+                dd = dd.sort_values("timestamp").reset_index(drop=True)
+            a_tf = _atr_series(dd)
+            p_tf = float(dd["close"].iloc[-1])
+            a_now = float(a_tf[-1]) or 1.0
+            rel = {}
+            try:
+                from key_levels import level_relation, bollinger_bands
+                lvls = detect_levels(dd, a_tf)
+                rel = level_relation(p_tf, lvls, a_now, len(dd) - 1)
+                bb_arr = bollinger_bands(dd)
+                rel["bb_up"] = float(bb_arr[1][-1])
+                rel["bb_low"] = float(bb_arr[2][-1])
+                rel["_atr"] = a_now
+                rel["_price"] = p_tf
+            except Exception:
+                pass
+            tf_ctx[w_tf] = rel
+
         for w in warns:
             w_tf = w.get("tf", tf)
-            # 无 price 的预警 (布林/波动启动) 用对应面板最新收盘价
-            px = w.get("price")
-            if px is None:
-                if w_tf == "4h" and df4_raw is not None:
-                    px = float(df4_raw["close"].iloc[-1])
-                elif w_tf == "15m" and df15_raw is not None:
-                    px = float(df15_raw["close"].iloc[-1])
-                else:
-                    px = float(d["close"].iloc[-1])
+            ctx = tf_ctx.get(w_tf, {})
+            w_price = w.get("price")
+            w_side = w.get("side", "")
+            # 组装标注: 级别图标 + 描述 + 点位 + ATR 距离
+            parts = [w.get("desc", "")]
+            if w_price is not None:
+                parts.append(f"位 {w_price:.0f}")
+            elif w_side and ctx:
+                # L1 接近: 从 rel 取点位
+                side_key = "support" if w_side in ("支撑", "support") else "resistance"
+                lv = ctx.get(side_key)
+                if lv:
+                    parts.append(f"位 {lv['price']:.0f} ({lv['dist_atr']:.2f}ATR)")
+            elif w_side in ("上轨", "下轨") and ctx:
+                key = "bb_up" if w_side == "上轨" else "bb_low"
+                if ctx.get(key):
+                    dist = abs(ctx["_price"] - ctx[key]) / ctx.get("_atr", 1)
+                    parts.append(f"{w_side} {ctx[key]:.0f} ({dist:.2f}ATR)")
+            # 当前价距离 (若有 ctx)
+            if ctx and w_price is not None and ctx.get("_atr"):
+                dist = abs(ctx["_price"] - w_price) / ctx["_atr"]
+                if dist < 10:
+                    parts.append(f"距{dist:.2f}ATR")
             alerts.append({
-                "price": float(px), "level": w.get("level", "L2"),
-                "tf": w_tf, "text": f"{w.get('desc', '')[:18]}",
+                "price": float(w_price) if w_price is not None else (
+                    ctx.get("_price", float(d["close"].iloc[-1]))),
+                "level": w.get("level", "L2"),
+                "tf": w_tf, "text": " ".join(parts)[:40],
             })
 
         # 关键位标注: 1h 支撑/阻力 (带 band) + 15M/4H 辅助面板
