@@ -406,6 +406,21 @@ def make_chart(
     ax2.bar(x, v, color=vol_colors, width=width, alpha=0.7)
     ax2.set_ylabel("Vol", color=C_TEXT, fontsize=8)
 
+    # 辅助: 在面板上画布林带 + MA20 (基于面板自身 close)
+    def _draw_bb(ax, close_series, x_arr, period=20, std=2.0):
+        cs = pd.Series(close_series, dtype=float)
+        sma = cs.rolling(period, min_periods=period).mean()
+        sd = cs.rolling(period, min_periods=period).std(ddof=0)
+        up = sma + std * sd
+        lo = sma - std * sd
+        ax.fill_between(x_arr, up, lo, color=C_BB, alpha=0.10, zorder=1)
+        ax.plot(x_arr, sma, color=C_BB, linewidth=0.8, alpha=0.65)
+        ax.plot(x_arr, up, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
+        ax.plot(x_arr, lo, color=C_BB, linewidth=0.6, alpha=0.45, linestyle="--")
+        # MA20 (橙)
+        ma20 = cs.rolling(20, min_periods=20).mean()
+        ax.plot(x_arr, ma20, color="#d08770", linewidth=1.0, alpha=0.85)
+
     # ── 左: 15M 短线面板 (最近 n_bars 根 ≈ 12小时) ──
     if ax15 is not None and df_15m is not None:
         d15 = df_15m.copy()
@@ -426,6 +441,8 @@ def make_chart(
                 (x15[i] - w15 / 2, min(o15[i], c15[i])), w15,
                 abs(c15[i] - o15[i]) or 1e-6,
                 facecolor=col15, edgecolor=col15, linewidth=0.35))
+        # 15M 布林带 + MA20
+        _draw_bb(ax15, c15, x15)
         # 15M 关键位 (带 band)
         for lv in (levels_15m_chart or []):
             if isinstance(lv, dict):
@@ -479,6 +496,8 @@ def make_chart(
             ax3.add_patch(Rectangle(
                 (x4[i] - w4 / 2, min(o4[i], c4[i])), w4, abs(c4[i] - o4[i]) or 1e-6,
                 facecolor=col4, edgecolor=col4, linewidth=0.4))
+        # 4H 布林带 + MA20
+        _draw_bb(ax3, c4, x4)
         # 4H 关键位 (带 band)
         for lv in (levels_4h_chart or []):
             if isinstance(lv, dict):
