@@ -392,8 +392,8 @@ def make_chart(
 
     ax1.set_title(f"{symbol}  {tf}  (横轴: 距最新K线根数)",
                   color=C_TEXT, fontsize=11, loc="left")
-    ax1.legend(loc="upper left", fontsize=7, facecolor=C_BG, edgecolor=C_GRID,
-               labelcolor=C_TEXT)
+    ax1.legend(loc="lower left", fontsize=7, facecolor=C_BG, edgecolor=C_GRID,
+               labelcolor=C_TEXT)  # lower left: 避开左上角预警标注
     ax1.set_ylabel("Price", color=C_TEXT, fontsize=8)
     # K线图横轴 = 距最新 K 线的根数 (显式设置, 不依赖 VOL 的 sharex)
     ax1.xaxis.set_major_locator(mtick.MaxNLocator(6))
@@ -521,32 +521,49 @@ def make_chart(
     for lbl in ax2.get_xticklabels():
         lbl.set_rotation = 0
 
-    # 预警标注: 按 tf 分配到对应面板, 在面板左上角用文字标注 (不画K线标记)
-    # 同面板多条预警纵向堆叠 (y 递减, 避免重叠)
+    # 预警标注: 左上角文字 + K线图上当前价→目标位的竖线/箭头 + ATR 距离
     alert_pos = {"4h": 0, "1h": 0, "15m": 0}
 
-    def _draw_alert(ax, a):
+    def _draw_alert(ax, a, x_last, cur_px):
         icon = {"L1": "🔵", "L2": "⚡", "L3": "💥"}.get(a.get("level", "L2"), "")
         color = {"L1": "#5a9cf8", "L2": "#e6a23c", "L3": "#e15241"} \
             .get(a.get("level", "L2"), "#e6a23c")
+        # 左上角文字 (级别 + 描述)
         slot = alert_pos.get(a.get("tf", tf), 0)
         alert_pos[a.get("tf", tf)] = slot + 1
-        y = 0.95 - slot * 0.07  # 每条下移 7%
+        y = 0.95 - slot * 0.06
         ax.text(0.015, y, f"{icon} {a.get('text', '')}",
                 transform=ax.transAxes, fontsize=8, color=color,
                 ha="left", va="top", alpha=0.95,
                 bbox=dict(boxstyle="round,pad=0.25", facecolor="#262b38",
                           edgecolor=color, linewidth=0.5, alpha=0.85))
+        # K线图上: 当前价 → 目标位 竖线 + 箭头 + 距离标注
+        target = a.get("target")
+        dist_atr = a.get("dist_atr")
+        if target is not None and dist_atr is not None and dist_atr < 10:
+            ax.annotate(
+                "", xy=(x_last, target), xytext=(x_last, cur_px),
+                arrowprops=dict(arrowstyle="->", color=color, lw=1.2,
+                                alpha=0.85, shrinkA=0, shrinkB=0),
+                zorder=6)
+            # 距离标注 (线段中点, 略偏右)
+            mid = (cur_px + target) / 2
+            ax.text(x_last + 0.3, mid, f" {dist_atr:.2f}ATR",
+                    fontsize=7.5, color=color, va="center", alpha=0.95,
+                    bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
+                              edgecolor=color, linewidth=0.3, alpha=0.8),
+                    zorder=7)
 
     if alerts:
         for a in alerts:
             a_tf = a.get("tf", tf)
+            cur_px = a.get("cur", price_last)
             if a_tf == "4h" and ax3 is not None:
-                _draw_alert(ax3, a)
+                _draw_alert(ax3, a, x4[-1], cur_px)
             elif a_tf == "15m" and ax15 is not None:
-                _draw_alert(ax15, a)
+                _draw_alert(ax15, a, x15[-1], cur_px)
             else:
-                _draw_alert(ax1, a)  # 默认 1H 主图
+                _draw_alert(ax1, a, x[-1], cur_px)  # 默认 1H 主图
 
     fig.savefig(path, dpi=110, bbox_inches="tight", facecolor=C_BG)
     plt.close(fig)

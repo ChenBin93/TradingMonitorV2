@@ -690,31 +690,29 @@ def _send_warning_chart(cache: KlineCache, sym: str,
             ctx = tf_ctx.get(w_tf, {})
             w_price = w.get("price")
             w_side = w.get("side", "")
-            # 组装标注: 级别图标 + 描述 + 点位 + ATR 距离
-            parts = [w.get("desc", "")]
+            cur_px = ctx.get("_price", float(d["close"].iloc[-1]))
+            atr_px = ctx.get("_atr", 1.0)
+            # 目标位价格: 优先 w.price, 否则从 rel/bb 取
+            target = None
             if w_price is not None:
-                parts.append(f"位 {w_price:.0f}")
-            elif w_side and ctx:
-                # L1 接近: 从 rel 取点位
-                side_key = "support" if w_side in ("支撑", "support") else "resistance"
-                lv = ctx.get(side_key)
-                if lv:
-                    parts.append(f"位 {lv['price']:.0f} ({lv['dist_atr']:.2f}ATR)")
-            elif w_side in ("上轨", "下轨") and ctx:
-                key = "bb_up" if w_side == "上轨" else "bb_low"
-                if ctx.get(key):
-                    dist = abs(ctx["_price"] - ctx[key]) / ctx.get("_atr", 1)
-                    parts.append(f"{w_side} {ctx[key]:.0f} ({dist:.2f}ATR)")
-            # 当前价距离 (若有 ctx)
-            if ctx and w_price is not None and ctx.get("_atr"):
-                dist = abs(ctx["_price"] - w_price) / ctx["_atr"]
-                if dist < 10:
-                    parts.append(f"距{dist:.2f}ATR")
+                target = float(w_price)
+            elif w_side in ("支撑", "support") and ctx.get("support"):
+                target = float(ctx["support"]["price"])
+            elif w_side in ("阻力", "resistance") and ctx.get("resistance"):
+                target = float(ctx["resistance"]["price"])
+            elif w_side == "上轨" and ctx.get("bb_up"):
+                target = float(ctx["bb_up"])
+            elif w_side == "下轨" and ctx.get("bb_low"):
+                target = float(ctx["bb_low"])
+            # 距离 (ATR)
+            dist_atr = abs(cur_px - target) / atr_px if target else None
+            desc = w.get("desc", "")
             alerts.append({
-                "price": float(w_price) if w_price is not None else (
-                    ctx.get("_price", float(d["close"].iloc[-1]))),
+                "price": target if target is not None else cur_px,
                 "level": w.get("level", "L2"),
-                "tf": w_tf, "text": " ".join(parts)[:40],
+                "tf": w_tf, "text": desc,
+                "target": target, "cur": cur_px, "atr": atr_px,
+                "dist_atr": dist_atr,
             })
 
         # 关键位标注: 1h 支撑/阻力 (带 band) + 15M/4H 辅助面板
