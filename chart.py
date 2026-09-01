@@ -83,6 +83,82 @@ def pick_levels(levels: list[dict], price: float, atr: float,
     return sorted(out, key=lambda x: x["price"])
 
 
+def fused_levels(df: pd.DataFrame, price: float, atr: float,
+                 n_bins: int = 40, merge_atr: float = 0.8,
+                 max_dist_pct: float = 0.04, max_each_side: int = 2) -> list[dict]:
+    """融合关键位 — 成交量分布 (HVN) + swing 极点, 业界推荐做法
+
+    原理: 关键位本质是"资金聚集处" (成交量大的价格区), swing 极点只是近似。
+    步骤:
+      1. volume_profile 算 HVN 节点 (量聚集 bin)
+      2. 相邻 HVN 合并成带 (距离 < merge_atr×ATR), 取量加权中心 — 消除
+         64920/65018/65214 这类密集团
+      3. 加入 swing 极点 (find_swing_levels) 作为候选 (补足量带未覆盖的
+         支撑/阻力), 与量带对齐时标记触次
+      4. 量带中心相对当前价定支撑/阻力, 精选输出
+    只影响图表标注, 不改研究/检测逻辑。
+    """
+    from volume_profile import compute_volume_profile
+    from support_resistance import find_swing_levels
+
+    if df is None or len(df) < 60 or price <= 0 or atr <= 0:
+        return []
+    cur = float(price)
+    merge_d = merge_atr * atr
+
+    # 1) HVN 量节点 (原始 bin) + swing 极点
+    vp = compute_volume_profile(df, lookback=min(200, len(df)), n_bins=n_bins)
+    cand = []  # [(price, vol_pct, touch, src)]
+    if vp:
+        cand += [(float(h["price"]), float(h["volume_pct"]), 0, "vp")
+                 for h in vp.get("hvns", [])]
+    swing = find_swing_levels(df, lookback=min(600, len(df)))
+    for l in swing:
+        cand.append((float(l.price), 0.0, int(l.touch_count), "swing"))
+    if not cand:
+        return []
+
+    # 2) 先按 side 分组 (支撑=低于当前价, 阻力=高于当前价), 再组内聚类 —
+    #    避免跨价格合并导致"支撑变阻力" (62986/63109 合并后中心越过当前价)
+    def _cluster(cands):
+        if not cands:
+            return []
+        cands.sort(key=lambda x: x[0])
+        bands = []
+        for p, vol, touch, src in cands:
+            if bands and abs(p - bands[-1][0]) <= merge_d:
+                c0, v0, t0, s0 = bands[-1]
+                w0 = v0 if v0 > 0 else 0.5  # swing 候选无量 → 半权重
+                w1 = vol if vol > 0 else 0.5
+                bands[-1] = ((c0 * w0 + p * w1) / (w0 + w1),
+                             v0 + vol, t0 + touch, s0 + "," + src)
+            else:
+                bands.append((p, vol, touch, src))
+        return bands
+
+    cand_sup = [c for c in cand if c[0] < cur]
+    cand_res = [c for c in cand if c[0] > cur]
+    bands = [(p, v, t, s, "support") for p, v, t, s in _cluster(cand_sup)]
+    bands += [(p, v, t, s, "resistance") for p, v, t, s in _cluster(cand_res)]
+
+    # 3) 精选 (量占比优先, 触次次之)
+    out = []
+    for center, vol, touch, src, side in bands:
+        if abs(center - cur) > max_dist_pct * cur:
+            continue
+        out.append({
+            "price": center, "side": side,
+            "touch": touch, "vol_pct": vol,
+            "dist": abs(center - cur), "src": src,
+        })
+    final = []
+    for side in ("support", "resistance"):
+        side_lv = sorted([k for k in out if k["side"] == side],
+                         key=lambda x: (-x["vol_pct"], -x["touch"], x["dist"]))
+        final.extend(side_lv[:max_each_side])
+    return sorted(final, key=lambda x: x["price"])
+
+
 def make_chart(
     df: pd.DataFrame,
     symbol: str,
