@@ -403,15 +403,21 @@ def make_chart(
                     bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
                               edgecolor=col_e, linewidth=0.3, alpha=0.7))
 
-    # 辅助: 画道氏段高低点标记 (起点/终点圆点 + 段方向)
+    # 辅助: 画道氏 HH/HL 序列标记 (HH=更高高点黄倒三角, HL=更高低点蓝正三角)
     def _draw_dow_marks(ax, marks):
         for idx, px, kind in (marks or []):
-            if kind == "H":
+            if kind == "HH":
                 ax.scatter([idx], [px], marker="v", s=40, color="#f2c94c",
                            zorder=6, edgecolor="white", linewidth=0.5)
-            else:
+                ax.annotate("HH", (idx, px), textcoords="offset points",
+                            xytext=(-2, -14), fontsize=6, color="#f2c94c",
+                            ha="center", alpha=0.9)
+            elif kind == "HL":
                 ax.scatter([idx], [px], marker="^", s=40, color="#56ccf2",
                            zorder=6, edgecolor="white", linewidth=0.5)
+                ax.annotate("HL", (idx, px), textcoords="offset points",
+                            xytext=(-2, 6), fontsize=6, color="#56ccf2",
+                            ha="center", alpha=0.9)
 
     # 辅助: 画最近 win 根线性回归线 (趋势线)
     def _draw_regression(ax, close_arr, x_arr, win=20):

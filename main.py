@@ -809,14 +809,17 @@ def _send_warning_chart(cache: KlineCache, sym: str,
     return None
 
 
-def _dow_marks_for(df, max_marks: int = 6) -> list:
-    """从 DataFrame 提取道氏段高低点标记 [(idx, price, 'H'/'L'), ...]
+def _dow_marks_for(df, max_marks: int = 10) -> list:
+    """从 DataFrame 提取道氏 HH/HL 序列标记 [(idx, price, 'HH'/'HL'), ...]
 
-    对 df 跑 dow_segments, 取最近段的段内极值 pivot 位置与价格。
-    idx 是相对于 df 尾部窗口的位置 (0=最老), 图表用根数坐标。
+    道氏: 上升趋势 = 高点持续抬升 (HH) + 低点持续抬升 (HL)。
+    用 confirmed_pivots 拿全部 pivot, 遍历判断:
+      - pivot high 高于前一个确认 pivot high → HH (更高高点)
+      - pivot low 高于前一个确认 pivot low → HL (更高低点)
+      - (下跌趋势对应 LL/LH, 但统一标 HH/HL 颜色区分: 高点黄 / 低点蓝)
+    只标窗口内可见的, idx 为窗口内根数坐标 (0=最老)。
     """
-    import numpy as np
-    from research.structures import dow_segments
+    from research.structures import confirmed_pivots
     try:
         dd = df.copy()
         if "timestamp" in dd.columns:
@@ -824,33 +827,29 @@ def _dow_marks_for(df, max_marks: int = 6) -> list:
         dd = dd.sort_index()
         if len(dd) < 20:
             return []
-        res = dow_segments(dd)
-        segs = res.get("segs") or []
-        marks = []
-        for seg in segs[-3:]:  # 最近 3 段
-            s, e = seg["start"], seg["end"]
-            if e < 0:
-                continue
-            seg_slice = dd.iloc[max(0, s):e + 1]
-            if seg_slice.empty:
-                continue
-            if seg.get("direction") == "up":
-                # 段内最高点 (H)
-                i = seg_slice["high"].idxmax()
-                px = float(seg_slice.loc[i, "high"])
-                idx = s + int(seg_slice.index.get_loc(i))  # 全量索引
-                marks.append((idx, px, "H"))
-            elif seg.get("direction") == "down":
-                i = seg_slice["low"].idxmin()
-                px = float(seg_slice.loc[i, "low"])
-                idx = s + int(seg_slice.index.get_loc(i))  # 全量索引
-                marks.append((idx, px, "L"))
-        # 图表显示窗口 = 尾部 48 根, 标记 x = idx - (n - 48) (0=窗口最老)
         n = len(dd)
         win = 48
+        hi = dd["high"].values
+        lo = dd["low"].values
+        pivot_hi, pivot_lo = confirmed_pivots(dd)
+        marks = []
+        last_hi = None
+        last_lo = None
+        # 只看窗口内 (尾部 win 根)
+        start = max(0, n - win - 10)  # 往前多取 10 根做参考 (前一个 pivot)
+        for j in range(start, n):
+            if pivot_hi[j]:
+                if last_hi is None or hi[j] > last_hi:
+                    marks.append((j, hi[j], "HH"))  # 更高高点
+                last_hi = hi[j]
+            if pivot_lo[j]:
+                if last_lo is None or lo[j] > last_lo:
+                    marks.append((j, lo[j], "HL"))  # 更高低点
+                last_lo = lo[j]
+        # 转窗口坐标 + 过滤
         out = []
-        for idx, px, k in marks:
-            x = idx - (n - win)
+        for j, px, k in marks:
+            x = j - (n - win)
             if 0 <= x < win:
                 out.append((x, px, k))
         return out[-max_marks:]
