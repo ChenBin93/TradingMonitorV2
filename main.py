@@ -623,6 +623,29 @@ def _send_warning_chart(cache: KlineCache, sym: str,
         except Exception:
             pass
 
+        # ── 日线 (4h resample, 大周期面板) — 独立取 4h, 不依赖 df4_raw ──
+        df1d_raw = None
+        levels_1d_chart = []
+        try:
+            _df4 = cache.get_df(sym, "4h")
+            if _df4 is not None and len(_df4) >= 30:
+                d4t = _df4.copy()
+                if "timestamp" in d4t.columns:
+                    d4t = d4t.set_index("timestamp")
+                d4t = d4t.sort_index()
+                import market_structure as _ms
+                df1d_raw = _ms.resample_daily(d4t).reset_index()
+                if df1d_raw is not None and len(df1d_raw) >= 30:
+                    d1d = df1d_raw.copy()
+                    if "timestamp" in d1d.columns:
+                        d1d = d1d.sort_values("timestamp").reset_index(drop=True)
+                    atr1d = _atr_series(d1d)
+                    atr1d_now = float(atr1d[-1]) or 1.0
+                    levels_1d_chart = fused_levels(d1d, price_now, atr1d_now,
+                                                   max_dist_pct=0.10)
+        except Exception:
+            pass
+
         # ── 4H 大周期 (辅助面板 + 关键位) ──
         df4_raw = None
         levels_4h_chart = []
@@ -732,9 +755,10 @@ def _send_warning_chart(cache: KlineCache, sym: str,
                 "dist_atr": dist_atr,
             })
 
-        # 关键位标注: 1h 支撑/阻力 (带 band) + 15M/4H 辅助面板
+        # 关键位标注: 1h 支撑/阻力 (带 band) + 日线/4H/15M 辅助面板
         path = make_chart(d, sym, tf, levels=levels,
                           alerts=alerts, bb=bb, ma60=ma60, info=info,
+                          df_1d=df1d_raw, levels_1d_chart=levels_1d_chart,
                           df_15m=df15_raw, levels_15m_chart=levels_15m_chart,
                           df_4h=df4_raw, levels_4h_chart=levels_4h_chart)
         if path:

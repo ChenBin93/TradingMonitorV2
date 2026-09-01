@@ -191,6 +191,8 @@ def make_chart(
     levels_4h_chart: list | None = None,
     df_15m: pd.DataFrame | None = None,
     levels_15m_chart: list | None = None,
+    df_1d: pd.DataFrame | None = None,
+    levels_1d_chart: list | None = None,
     out_dir: str = "/tmp/charts",
     n_bars: int = 48,
 ) -> str:
@@ -279,33 +281,49 @@ def make_chart(
     fname = f"{symbol.replace('/', '_').replace(':', '_')}_{tf}.png"
     path = os.path.join(out_dir, fname)
 
-    # ── 布局: 信息栏(整宽) + 4H/1H/15M 三面板横向并排 (大周期→小周期) ──
+    # ── 布局: 信息栏(整宽) + 2×2 网格 (上排: 日线/4H, 下排: 1H/15M) ──
     has_15m = df_15m is not None and len(df_15m) >= 20
     has_4h = df_4h is not None and len(df_4h) >= 20
-    n_col = 1 + int(has_15m) + int(has_4h)
-    fig = plt.figure(figsize=(5.2 * n_col, 6.6), facecolor=C_BG)
-    gs = fig.add_gridspec(3, n_col, height_ratios=[0.85, 3.2, 1],
-                          hspace=0.16, wspace=0.18,
-                          left=0.05, right=0.985, top=0.92, bottom=0.08)
+    has_1d = df_1d is not None and len(df_1d) >= 20
+    # 网格: 每周期占一格 (价格+量上下)
+    # 上排周期: [日线, 4H]; 下排周期: [1H, 15M]
+    top_row = [x for x in (("1d", has_1d), ("4h", has_4h)) if x[1]]
+    bot_row = [x for x in (("1h", True), ("15m", has_15m)) if x[1]]
+    n_top = len(top_row)
+    n_bot = len(bot_row)
+    n_col = max(n_top, n_bot, 1)
+    fig = plt.figure(figsize=(6.2 * n_col, 9.0), facecolor=C_BG)
+    # 5 行网格: 0=信息栏, 1-2=上排(价格+量), 3-4=下排(价格+量)
+    gs = fig.add_gridspec(5, n_col, height_ratios=[0.8, 3.0, 0.9, 3.0, 0.9],
+                          hspace=0.30, wspace=0.20,
+                          left=0.05, right=0.985, top=0.94, bottom=0.06)
     ax0 = fig.add_subplot(gs[0, :])   # 信息栏 (整宽)
     ax0.axis("off")
     plot_axes = []
     ax15 = ax15v = None
     ax1 = ax2 = None
     ax3 = ax4 = None
+    axd = axdv = None
+    # 上排: 日线 (col 0), 4H (col 1)
     col = 0
-    if has_4h:
-        ax3 = fig.add_subplot(gs[1, col])     # 4H 价格 (最左, 大周期)
-        ax4 = fig.add_subplot(gs[2, col], sharex=ax3)  # 4H 量 (同 x)
-        plot_axes += [ax3, ax4]
+    if has_1d:
+        axd = fig.add_subplot(gs[1, col])
+        axdv = fig.add_subplot(gs[2, col], sharex=axd)
+        plot_axes += [axd, axdv]
         col += 1
-    ax1 = fig.add_subplot(gs[1, col])         # 1H 主图 (中间)
-    ax2 = fig.add_subplot(gs[2, col], sharex=ax1)      # 1H 量 (同 x)
+    if has_4h:
+        ax3 = fig.add_subplot(gs[1, col])
+        ax4 = fig.add_subplot(gs[2, col], sharex=ax3)
+        plot_axes += [ax3, ax4]
+    # 下排: 1H (col 0), 15M (col 1)
+    col = 0
+    ax1 = fig.add_subplot(gs[3, col])
+    ax2 = fig.add_subplot(gs[4, col], sharex=ax1)
     plot_axes += [ax1, ax2]
     col += 1
     if has_15m:
-        ax15 = fig.add_subplot(gs[1, col])    # 15M 价格 (最右, 小周期)
-        ax15v = fig.add_subplot(gs[2, col], sharex=ax15)  # 15M 量 (同 x)
+        ax15 = fig.add_subplot(gs[3, col])
+        ax15v = fig.add_subplot(gs[4, col], sharex=ax15)
         plot_axes += [ax15, ax15v]
     for ax in plot_axes:
         ax.set_facecolor(C_BG)
@@ -488,6 +506,60 @@ def make_chart(
         ax15v.xaxis.set_major_formatter(mtick.FuncFormatter(
             lambda t, _p: f"-{int(len(d15) - 1 - t)}" if t < len(d15) - 1 else "0"))
         for lbl in ax15v.get_xticklabels():
+            lbl.set_rotation = 0
+
+    # ── 日线面板 (最左, 大周期) ──
+    if axd is not None and df_1d is not None:
+        dd_full = df_1d.copy()
+        if "timestamp" in dd_full.columns:
+            dd_full = dd_full.set_index("timestamp")
+        dd_full = dd_full.sort_index()
+        cd_full = dd_full["close"].to_numpy(float)  # 全量 close
+        dd = dd_full.tail(n_bars)
+        od = dd["open"].to_numpy(float)
+        hd = dd["high"].to_numpy(float)
+        ld = dd["low"].to_numpy(float)
+        cd = dd["close"].to_numpy(float)
+        vd = dd["volume"].to_numpy(float) if "volume" in dd.columns else np.ones(len(dd))
+        xd = np.arange(len(dd))
+        wd = 0.65
+        for i in range(len(dd)):
+            cold = C_UP if cd[i] >= od[i] else C_DOWN
+            axd.plot([xd[i], xd[i]], [ld[i], hd[i]], color=cold, linewidth=0.8)
+            axd.add_patch(Rectangle(
+                (xd[i] - wd / 2, min(od[i], cd[i])), wd, abs(cd[i] - od[i]) or 1e-6,
+                facecolor=cold, edgecolor=cold, linewidth=0.45))
+        _draw_bb(axd, cd_full, xd)  # 日线布林带 + MA20
+        # 日线关键位 (带 band)
+        for lv in (levels_1d_chart or []):
+            if isinstance(lv, dict):
+                pxd = lv["price"]
+                bd = lv.get("band") or 0.0
+                cold = C_SUP if lv.get("side") == "support" else C_RES
+                if bd > 0:
+                    axd.axhspan(pxd - bd, pxd + bd, color=cold, alpha=0.05, linewidth=0)
+                axd.axhline(pxd, color=cold, linewidth=1.0, alpha=0.8)
+                axd.text(xd[-1], pxd, f"  {pxd:.0f}",
+                          color=cold, fontsize=7, va="center", ha="right",
+                          alpha=1.0, fontweight="bold",
+                          bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
+                                    edgecolor=cold, linewidth=0.3, alpha=0.8))
+            else:
+                axd.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
+        axd.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
+        axd.set_title(f"日线 (最近 {len(dd)} 根)", color=C_DIM, fontsize=9, loc="left")
+        axd.set_ylabel("1D", color=C_TEXT, fontsize=8)
+        axd.xaxis.set_major_locator(mtick.MaxNLocator(6))
+        axd.xaxis.set_major_formatter(mtick.FuncFormatter(
+            lambda t, _p: f"-{int(len(dd) - 1 - t)}" if t < len(dd) - 1 else "0"))
+        axd.tick_params(axis="x", colors=C_TEXT, labelsize=7)
+        vold = [C_UP if cd[i] >= od[i] else C_DOWN for i in range(len(dd))]
+        axdv.bar(xd, vd, color=vold, width=wd, alpha=0.7)
+        axdv.set_ylabel("Vol", color=C_TEXT, fontsize=8)
+        axdv.xaxis.set_major_locator(mtick.MaxNLocator(6))
+        axdv.xaxis.set_major_formatter(mtick.FuncFormatter(
+            lambda t, _p: f"-{int(len(dd) - 1 - t)}" if t < len(dd) - 1 else "0"))
+        for lbl in axdv.get_xticklabels():
             lbl.set_rotation = 0
 
     # ── 右: 4H 大周期面板 (横向并排) ──
