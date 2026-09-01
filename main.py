@@ -582,15 +582,20 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
             return
         from market_phase import _atr_series
         from key_levels import detect_levels, bollinger_bands
+        from chart import pick_levels
         d = df.copy()
         if "timestamp" in d.columns:
             d = d.sort_values("timestamp").reset_index(drop=True)
         atr = _atr_series(d)
-        levels = detect_levels(d, atr)
+        price_now = float(d["close"].iloc[-1])
+        atr_now = float(atr[-1]) or 1.0
+        levels_raw = detect_levels(d, atr)
+        # 关键位精选: 去远位 + 消解支撑/阻力重叠 + 限数量
+        levels = pick_levels(levels_raw, price_now, atr_now)
         bb = bollinger_bands(d)
         ma60 = d["close"].rolling(60, min_periods=60).mean()
 
-        # ── 4H 关键位 (虚线, 大方向参考) ──
+        # ── 4H 关键位 (虚线, 大方向参考) — 同样只保留近位 ──
         levels_4h = []
         try:
             df4 = cache.get_df(sym, "4h")
@@ -599,7 +604,10 @@ def _send_warning_chart(feishu: Feishu, cache: KlineCache, sym: str,
                 if "timestamp" in d4.columns:
                     d4 = d4.sort_values("timestamp").reset_index(drop=True)
                 atr4 = _atr_series(d4)
-                levels_4h = [lv["price"] for lv in detect_levels(d4, atr4)][:4]
+                atr4_now = float(atr4[-1]) or 1.0
+                l4 = pick_levels(detect_levels(d4, atr4), price_now, atr4_now,
+                                 max_dist_pct=0.04, merge_pct=0.004, max_each_side=2)
+                levels_4h = [x["price"] for x in l4]
         except Exception:
             pass
 

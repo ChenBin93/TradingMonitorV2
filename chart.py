@@ -28,6 +28,61 @@ C_TEXT = "#d8dce6"
 C_DIM = "#7a8194"     # 次要文字
 
 
+def pick_levels(levels: list[dict], price: float, atr: float,
+                max_dist_pct: float = 0.04, merge_pct: float = 0.004,
+                max_each_side: int = 2) -> list[dict]:
+    """关键位精选 — 解决图上位标注混乱 (支撑/阻力重叠 + 远位干扰)
+
+    距离用价格百分比 (ATR 归一在宽位距标的上失效: BTC ATR 185 但位距 400+):
+      1. 过滤距当前价 > max_dist_pct×price (默认 4%) 的远位
+      2. 支撑/阻力价差 < merge_pct×price (默认 0.4%) 时视为同一密集区:
+         保留触碰次数多的一个, 消解红绿重叠
+      3. 每侧最多 max_each_side 条 (触碰次数优先), 输出按价格排序
+    只影响图表标注, 不改研究/检测逻辑。
+    """
+    if not levels or price <= 0:
+        return []
+    cur = float(price)
+    max_d = max_dist_pct * cur
+    merge_d = merge_pct * cur
+    # 1) 距离过滤 + 信息增强
+    cand = []
+    for lv in levels:
+        px = float(lv["price"])
+        if abs(px - cur) > max_d:
+            continue
+        cand.append({
+            "price": px, "side": lv.get("side", ""),
+            "touch": int(lv.get("touch", 0) or lv.get("touch_count", 0) or 0),
+            "dist": abs(px - cur),
+        })
+    # 2) 冲突消解: 跨 side 距离 < merge_d 的, 保留 touch 多的
+    cand.sort(key=lambda x: x["price"])
+    kept = []
+    for lv in cand:
+        merged = False
+        for k in kept:
+            if abs(k["price"] - lv["price"]) < merge_d:
+                # 保留触碰多/距近的; 相同则保留支撑 (惯例: 下方支撑优先)
+                if lv["touch"] > k["touch"] or (
+                        lv["touch"] == k["touch"] and lv["dist"] < k["dist"]):
+                    k["price"] = lv["price"]
+                    k["side"] = lv["side"]
+                    k["touch"] = lv["touch"]
+                    k["dist"] = lv["dist"]
+                merged = True
+                break
+        if not merged:
+            kept.append(dict(lv))
+    # 3) 每侧限数量 (触碰次数优先)
+    out = []
+    for side in ("support", "resistance"):
+        side_lv = sorted([k for k in kept if k["side"] == side],
+                         key=lambda x: (-x["touch"], x["dist"]))
+        out.extend(side_lv[:max_each_side])
+    return sorted(out, key=lambda x: x["price"])
+
+
 def make_chart(
     df: pd.DataFrame,
     symbol: str,
