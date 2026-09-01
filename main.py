@@ -782,6 +782,15 @@ def _send_warning_chart(cache: KlineCache, sym: str,
                 "dist_atr": dist_atr,
             })
 
+        # 道氏段高低点标记 (各周期)
+        dow_marks = {}
+        for mk_tf, mk_df in (("1d", df1d_raw), ("4h", df4_raw),
+                             ("1h", d), ("15m", df15_raw)):
+            if mk_df is not None and len(mk_df) >= 20:
+                mks = _dow_marks_for(mk_df)
+                if mks:
+                    dow_marks[mk_tf] = mks
+
         # 关键位标注: 本周期位 + 最近大周期位 (虚线)
         path = make_chart(d, sym, tf, levels=levels,
                           alerts=alerts, bb=bb, ma60=ma60, info=info,
@@ -791,12 +800,62 @@ def _send_warning_chart(cache: KlineCache, sym: str,
                           extra_15m=extra_15m,
                           df_4h=df4_raw, levels_4h_chart=levels_4h_chart,
                           extra_4h=extra_4h,
-                          extra_1h=extra_1h)
+                          extra_1h=extra_1h,
+                          dow_marks=dow_marks)
         if path:
             return sym, path
     except Exception as e:
         logger.warning(f"Chart {sym} failed: {e}")
     return None
+
+
+def _dow_marks_for(df, max_marks: int = 6) -> list:
+    """从 DataFrame 提取道氏段高低点标记 [(idx, price, 'H'/'L'), ...]
+
+    对 df 跑 dow_segments, 取最近段的段内极值 pivot 位置与价格。
+    idx 是相对于 df 尾部窗口的位置 (0=最老), 图表用根数坐标。
+    """
+    import numpy as np
+    from research.structures import dow_segments
+    try:
+        dd = df.copy()
+        if "timestamp" in dd.columns:
+            dd = dd.set_index("timestamp")
+        dd = dd.sort_index()
+        if len(dd) < 20:
+            return []
+        res = dow_segments(dd)
+        segs = res.get("segs") or []
+        marks = []
+        for seg in segs[-3:]:  # 最近 3 段
+            s, e = seg["start"], seg["end"]
+            if e < 0:
+                continue
+            seg_slice = dd.iloc[max(0, s):e + 1]
+            if seg_slice.empty:
+                continue
+            if seg.get("direction") == "up":
+                # 段内最高点 (H)
+                i = seg_slice["high"].idxmax()
+                px = float(seg_slice.loc[i, "high"])
+                idx = s + int(seg_slice.index.get_loc(i))  # 全量索引
+                marks.append((idx, px, "H"))
+            elif seg.get("direction") == "down":
+                i = seg_slice["low"].idxmin()
+                px = float(seg_slice.loc[i, "low"])
+                idx = s + int(seg_slice.index.get_loc(i))  # 全量索引
+                marks.append((idx, px, "L"))
+        # 图表显示窗口 = 尾部 48 根, 标记 x = idx - (n - 48) (0=窗口最老)
+        n = len(dd)
+        win = 48
+        out = []
+        for idx, px, k in marks:
+            x = idx - (n - win)
+            if 0 <= x < win:
+                out.append((x, px, k))
+        return out[-max_marks:]
+    except Exception:
+        return []
 
 
 def _opportunity_score(item: dict) -> dict:

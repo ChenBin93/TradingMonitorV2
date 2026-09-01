@@ -197,6 +197,7 @@ def make_chart(
     extra_15m: list | None = None,
     extra_4h: list | None = None,
     extra_1h: list | None = None,
+    dow_marks: dict | None = None,
     out_dir: str = "/tmp/charts",
     n_bars: int = 48,
 ) -> str:
@@ -213,6 +214,7 @@ def make_chart(
     levels_4h_chart: 4h 关键位 dict 列表 (带 band)
     df_15m: 15m K线 (最左面板)
     levels_15m_chart: 15m 关键位 dict 列表
+    dow_marks: 各周期道氏段高低点标记 {"1d": [(idx, price, 'H'/'L'), ...], "4h":..., "1h":..., "15m":...}
     n_bars: 每面板显示根数 (默认 48)
     """
     import matplotlib
@@ -401,6 +403,36 @@ def make_chart(
                     bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
                               edgecolor=col_e, linewidth=0.3, alpha=0.7))
 
+    # 辅助: 画道氏段高低点标记 (起点/终点圆点 + 段方向)
+    def _draw_dow_marks(ax, marks):
+        for idx, px, kind in (marks or []):
+            if kind == "H":
+                ax.scatter([idx], [px], marker="v", s=40, color="#f2c94c",
+                           zorder=6, edgecolor="white", linewidth=0.5)
+            else:
+                ax.scatter([idx], [px], marker="^", s=40, color="#56ccf2",
+                           zorder=6, edgecolor="white", linewidth=0.5)
+
+    # 辅助: 画最近 win 根线性回归线 (趋势线)
+    def _draw_regression(ax, close_arr, x_arr, win=20):
+        n = len(close_arr)
+        if n < win:
+            return
+        y = close_arr[-win:]
+        xv = np.arange(win, dtype=float)
+        # 最小二乘: y = a + b*x
+        b, a = np.polyfit(xv, y, 1)
+        y0 = a + b * 0
+        y1 = a + b * (win - 1)
+        ax.plot([x_arr[-win], x_arr[-1]], [y0, y1],
+                color="#9b59b6", linewidth=1.4, alpha=0.9, zorder=4,
+                linestyle="-")
+        # 斜率标注 (每根涨幅)
+        ax.text(x_arr[-1], y1, f"  {b:.3f}/根", color="#9b59b6",
+                fontsize=7, va="center", ha="right", alpha=0.95,
+                bbox=dict(boxstyle="round,pad=0.12", facecolor=C_BG,
+                          edgecolor="#9b59b6", linewidth=0.3, alpha=0.8))
+
     # ── 主图: K线 (x 轴 = 距最新 K 线的根数, 0 为最新) ──
     x = np.arange(len(df))
     width = 0.65
@@ -436,6 +468,9 @@ def make_chart(
                                    edgecolor=col, linewidth=0.4, alpha=0.8))
             else:
                 ax1.axhline(lv, color=C_LEVEL, linewidth=0.8, alpha=0.5, linestyle=":")
+    # 1H 主图: 最近 20 根线性回归线 + 道氏段高低点
+    _draw_regression(ax1, c, x, win=20)
+    _draw_dow_marks(ax1, (dow_marks or {}).get("1h", []))
     # 1H 面板: 最近的大周期位 (虚线参考, 只叠加最近的 1-2 条)
     if extra_1h:
         for lv in extra_1h:
@@ -508,6 +543,8 @@ def make_chart(
             else:
                 ax15.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
         ax15.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
+        _draw_regression(ax15, c15, x15, win=20)
+        _draw_dow_marks(ax15, (dow_marks or {}).get("15m", []))
         _draw_extra(ax15, x15[-1], extra_15m, "↑")  # 最近大周期位参考
         ax15.set_title(f"15M (最近 {len(d15)} 根)", color=C_DIM, fontsize=9, loc="left")
         ax15.set_ylabel("15M", color=C_TEXT, fontsize=8)
@@ -565,6 +602,8 @@ def make_chart(
             else:
                 axd.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
         axd.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
+        _draw_regression(axd, cd, xd, win=20)
+        _draw_dow_marks(axd, (dow_marks or {}).get("1d", []))
         _draw_extra(axd, xd[-1], extra_1d, "↑")  # 最近大周期位参考
         axd.set_title(f"日线 (最近 {len(dd)} 根)", color=C_DIM, fontsize=9, loc="left")
         axd.set_ylabel("1D", color=C_TEXT, fontsize=8)
@@ -621,6 +660,8 @@ def make_chart(
             else:
                 ax3.axhline(lv, color=C_LEVEL, linewidth=0.7, alpha=0.5, linestyle="--")
         ax3.axhline(price_last, color=C_MA60, linewidth=0.7, alpha=0.4, linestyle=":")
+        _draw_regression(ax3, c4, x4, win=20)
+        _draw_dow_marks(ax3, (dow_marks or {}).get("4h", []))
         _draw_extra(ax3, x4[-1], extra_4h, "↑")  # 最近大周期位参考
         ax3.set_title(f"4H 大周期 (最近 {len(d4)} 根)", color=C_DIM, fontsize=9, loc="left")
         ax3.set_ylabel("4H", color=C_TEXT, fontsize=8)
