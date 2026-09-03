@@ -58,7 +58,7 @@ class BBMLTrader:
         self.state = TraderState(self.state_dir)
         self.monitor = Monitor(cfg.get("health", {}).get("port", 8095), self.status)
 
-        self.history = pd.DataFrame()
+        self.history = pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
         self.bars_seen = 0
         self.cur_state = 0       # 期望持仓: 1/-1/0
         self.pnl_bps = []        # 已平仓收益 bp
@@ -67,10 +67,21 @@ class BBMLTrader:
             self.feed = ReplayFeed(self.symbol, self.tf, start=start,
                                    warmup_bars=WIN_BARS + WARMUP)
             self.feed.speed = 999999
+            self.is_replay = True
         elif feed == "okx":
             self.feed = OkxFeed(self.symbol, self.tf)
+            self.feed.warmup(WIN_BARS + WARMUP)  # 启动拉满历史
+            # 预热: 把拉到的历史喂入
+            for ts, r in self.feed.history.iterrows():
+                self.history.loc[ts] = [float(r.open), float(r.high),
+                                        float(r.low), float(r.close),
+                                        float(r.volume)]
+                self.bars_seen += 1
+            self.is_replay = False
+            log.info("OKX warmup 完成: %d 根", len(self.history))
         else:
             self.feed = None
+            self.is_replay = False
 
     def fetch_candles(self):
         if self.feed is not None:
@@ -89,16 +100,13 @@ class BBMLTrader:
             ts = pd.Timestamp(ts)
         if ts.tzinfo is None:
             ts = ts.tz_localize("UTC")
-        row = pd.DataFrame([{
-            "open": float(bar["open"]), "high": float(bar["high"]),
-            "low": float(bar["low"]), "close": float(bar["close"]),
-            "volume": float(bar.get("volume", 0.0))}], index=[ts])
-        self.history = pd.concat([self.history, row]).tail(WIN_BARS + WARMUP)
+        self.history.loc[ts] = [float(bar["open"]), float(bar["high"]),
+                                float(bar["low"]), float(bar["close"]),
+                                float(bar.get("volume", 0.0))]
+        self.history = self.history.sort_index().tail(WIN_BARS + WARMUP)
         self.bars_seen += 1
         if self.bars_seen < WARMUP or len(self.history) < WIN_BARS:
             return
-
-        # 重算信号 (窗口 = 尾部 WIN_BARS 根)
         window = self.history.tail(WIN_BARS)
         sig = self.strat.run_signals(window, entry_models=self.entry_models,
                                      exit_model=self.exit_model)
@@ -117,9 +125,10 @@ class BBMLTrader:
             side = "buy" if target == 1 else "sell"
             px = float(window["close"].iloc[-1])  # 状态变化那根 close
             qty = self._position_size(px)
-            self.broker.open_position(self.symbol, side, px, qty,
-                                      {"side": "long" if target == 1 else "short",
-                                       "state": target})
+            pos = self.broker.open_position(self.symbol, side, px, qty,
+                                            {"side": "long" if target == 1 else "short",
+                                             "state": target})
+            self.state.set_position(pos)
             log.info("开仓 %s %s @ %.2f", self.symbol,
                      "long" if target == 1 else "short", px)
             self.cur_state = target
@@ -127,17 +136,21 @@ class BBMLTrader:
             # 平仓
             px = float(window["close"].iloc[-1])
             rec = self.broker.close_position(self.symbol, px, "signal_exit")
-            if rec and self.state.position:
-                entry_px = self.state.position.get("entry_price") or px
-                side = 1 if rec.get("side") == "long" else -1
+            spos = self.state.position or {}
+            entry_px = spos.get("entry_price") or px
+            pside = spos.get("side") or (rec or {}).get("side")
+            if rec and entry_px:
+                side = 1 if pside == "long" else -1
                 bp = side * (np.log(px / entry_px) * 1e4) - 4
                 self.pnl_bps.append(bp)
                 log.info("平仓 %s @ %.2f bp=%.1f", self.symbol, px, bp)
+            self.state.clear_position()
             self.cur_state = 0
         elif target != 0 and pos is not None and target != cur:
-            # 反向 → 先平后开 (简化: 平仓)
+            # 反向 → 平仓
             px = float(window["close"].iloc[-1])
             rec = self.broker.close_position(self.symbol, px, "signal_reverse")
+            self.state.clear_position()
             self.cur_state = 0
             log.info("反向平仓 %s @ %.2f", self.symbol, px)
 
@@ -161,13 +174,22 @@ class BBMLTrader:
         self.monitor.start()
         log.info("BBML paper 启动 (signal跟随): %s", self.symbol)
         start = time.time()
-        replay = isinstance(getattr(self, "feed", None), ReplayFeed)
+        replay = self.is_replay
         while True:
             if duration_sec and time.time() - start > duration_sec:
                 break
             try:
-                bar = self.fetch_candles()
-                self.on_bar(bar)
+                if replay:
+                    bar = self.fetch_candles()
+                    self.on_bar(bar)
+                else:
+                    # okx: refresh 后 diff 出新 bar 逐个处理
+                    self.feed.refresh()
+                    for ts, r in self.feed.history.iterrows():
+                        if ts not in self.history.index:
+                            self.on_bar({"ts": ts, "open": r.open, "high": r.high,
+                                         "low": r.low, "close": r.close,
+                                         "volume": r.volume})
             except StopIteration:
                 log.info("回放结束")
                 break
