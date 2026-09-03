@@ -19,3 +19,4 @@ data/*.db-shm
 data/*.db-wal
 logs/*.out
 research/TSaM.pdf
+live_trader/secrets_*.yaml
