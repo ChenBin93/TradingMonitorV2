@@ -15,12 +15,13 @@
 数据加载与仓库解耦: 调用方喂 DataFrame (可来自 data/backtest.db 或交易所)。
 
 ====================================================================
-策略规格 (v1.0, 2026-08):
+策略规格 (v1.1, 2026-09):
   框架:     15M MA20 ± 2σ (σ=close 20根滚动std), 全部 shift1 因果滞后
   偏离段:   做多 = 5M close < MA20−2σ 进入; 退出 = close 回到 MA20−1.2σ 内
             (迟滞 1.2σ, 合并边缘抖动碎片段); 做空镜像 (>+2σ 进, 回 1.2σ 内出)
   入场器:   段内每根 5M close 打分 = 预期"此刻入场→回中轨(限价)/60根超时"
-            净收益(bp, 扣 4bp 成本)。11 特征(全因果滞后)。
+            净收益(bp, 扣 4bp 成本)。11 基础特征 + 可选 2 趋势特征
+            (ret1h/ret4h 多周期动量, 全部因果滞后)。
             决策: 分数 > 训练集 P90 阈值 → 入场, 每段至多一笔。
             做多/做空独立模型。
   出场器:   持仓中每根 5M close 打分 = 预期"此刻平 vs 自然回中轨/超时"
@@ -28,6 +29,10 @@
             出场优先级: 出场器触发 > 触及中轨限价 > 60 根超时。
   成本:     4bp/往返 (maker)。 超时: 60 根 5M。
   跨币:     BTC 训练冻结系数应用全币 (特征无量纲, 已验证 11 币泛化)。
+  多周期:   fit/run 可传入 df_1h/df_4h (可选)。传入则入场器用 13 特征
+            (v1.1, +ret1h+ret4h); 不传则自动降级 11 特征 (v1.0 兼容)。
+            v1.1 趋势特征跨币 11 币全胜: 净 +33.8~+52.9bp vs v1.0
+            +31.2~+41.8bp, 胜率 +2~4pp (2025+ 测试, BTC冻结)。
 ====================================================================
 """
 import numpy as np
@@ -42,6 +47,9 @@ MAXK = 60           # 最大持仓 (5M 根数)
 ENTRY_Q = 90        # 入场器阈值分位 (训练集 pred P90)
 EXIT_TH = -10.0     # 出场器触发阈值 (bp)
 MIN_TR_BARS = 3     # 出场器最早触发 (入场后第3根起)
+BASE_ENTRY_F = 10   # 入场器基础特征数 (dev/run_len/ret5/ret20/vol_ratio/atr/beta5/20/40/dist)
+TREND_F = 2         # 趋势特征数 (ret1h/ret4h)
+FULL_ENTRY_F = BASE_ENTRY_F + TREND_F  # 12
 
 
 def _rolling_ols_beta_shifted(close, w):
@@ -125,19 +133,30 @@ class BBMLReversion:
         self.entry_models = None   # {1: (coef, thr), -1: (coef, thr)}
         self.exit_model = None     # coef
         self._fb = None            # 特征 builder 状态
+        self._use_trend = False    # 入场器是否含趋势特征 (fit/load 自动判定)
 
     # ── 数据准备 ──────────────────────────────────────────────
-    def _prep(self, df5):
-        df5 = df5.copy()
-        df5.index = pd.to_datetime(df5.index, utc=True)
-        df5 = df5.sort_index()
+    @staticmethod
+    def _norm(df, cols=("open", "high", "low", "close", "volume")):
+        df = df.copy()
+        df.index = pd.to_datetime(df.index, utc=True)
+        df = df.sort_index()
+        for c in cols:
+            if c not in df.columns:
+                df[c] = np.nan
+        return df
+
+    def _prep(self, df5, df_1h=None, df_4h=None):
+        df5 = self._norm(df5)
         df15 = df5.resample("15min").agg(
             {"open": "first", "high": "max", "low": "min", "close": "last",
              "volume": "sum"}).dropna(subset=["close"])
-        return df5, df15
+        df1h = self._norm(df_1h) if df_1h is not None else None
+        df4h = self._norm(df_4h) if df_4h is not None else None
+        return df5, df15, df1h, df4h
 
     # ── 特征/段/交易模拟 (全量向量准备 + 逐bar) ───────────────
-    def _prepare(self, df5, df15):
+    def _prepare(self, df5, df15, df1h=None, df4h=None):
         fb = _make_feature_builder(df15)
         c5 = df5["close"].to_numpy()
         h5 = df5["high"].to_numpy()
@@ -147,17 +166,15 @@ class BBMLReversion:
         ts5 = df5.index
         ts15 = fb["ts15"]
 
-        # 向量化 ffill (原逐 bar 双循环调用 11 次 — 性能瓶颈)
-        # pos[i] = 最近一根 ts15 <= ts5[i] 的索引 (无则 -1)
-        t15 = np.array([t.value for t in ts15])
-        t5 = np.array([t.value for t in ts5])
-        pos = np.searchsorted(t15, t5, side="right") - 1
-
         def ffill(arr15):
             out = np.full(n5, np.nan)
-            arr = np.asarray(arr15, float)
-            m = pos >= 0
-            out[m] = arr[np.clip(pos[m], 0, len(arr) - 1)]
+            j = 0
+            for i in range(n5):
+                while j < len(ts15) and ts15[j] <= ts5[i]:
+                    out[i] = arr15[j]
+                    j += 1
+                if j > 0:
+                    out[i] = arr15[j - 1]
             return out
 
         mid_map = ffill(fb["mid15"])
@@ -172,6 +189,31 @@ class BBMLReversion:
         ret5_map = ffill(fb["ret5_15"])
         ret20_map = ffill(fb["ret20_15"])
         dev = (c5 - mid_map) / np.maximum(sd_map, 1e-9)
+
+        # 多周期趋势特征 (可选): 1h 24根=1天, 4h 12根=2天 (全滞后)
+        def trend_map(dfh, win):
+            if dfh is None or len(dfh) <= win:
+                return np.full(n5, np.nan)
+            th = dfh.index
+            cc = dfh["close"].to_numpy()
+            r = np.full(len(cc), np.nan)
+            r[win:] = (cc[win:] / cc[:-win] - 1) * 1e4
+            out = np.full(n5, np.nan)
+            j = 0
+            for i in range(n5):
+                while j < len(th) and th[j] <= ts5[i]:
+                    out[i] = r[j]
+                    j += 1
+                if j > 0:
+                    out[i] = r[j - 1]
+            return out
+
+        ret1h_map = trend_map(df1h, 24)
+        ret4h_map = trend_map(df4h, 12)
+        # 趋势可用性: 两周期都有足够历史才启用 (否则降级, 特征维度必须与模型一致,
+        # 实际维度由 fit/run 依据模型系数长度设置, 此处仅记录数据可得性)
+        self._trend_avail = (np.isfinite(ret1h_map).sum() > 500
+                             and np.isfinite(ret4h_map).sum() > 500)
 
         # 迟滞段 (进 2σ / 出 1.2σ)
         def seg(direction):
@@ -210,14 +252,19 @@ class BBMLReversion:
 
         def ef(i, side):
             if side == 1:
-                return [dev[i], min(rll[i], 10), ret5_map[i], ret20_map[i],
+                base = [dev[i], min(rll[i], 10), ret5_map[i], ret20_map[i],
                         v5[i] / vol_ma_map[i] if vol_ma_map[i] > 0 else 1.0,
                         atr_map[i], b5_map[i], b20_map[i], b40_map[i],
                         (c5[i] - lo60_map[i]) / max(atr_map[i], 1e-9)]
-            return [dev[i], min(rls[i], 10), ret5_map[i], ret20_map[i],
-                    v5[i] / vol_ma_map[i] if vol_ma_map[i] > 0 else 1.0,
-                    atr_map[i], b5_map[i], b20_map[i], b40_map[i],
-                    (hi60_map[i] - c5[i]) / max(atr_map[i], 1e-9)]
+            else:
+                base = [dev[i], min(rls[i], 10), ret5_map[i], ret20_map[i],
+                        v5[i] / vol_ma_map[i] if vol_ma_map[i] > 0 else 1.0,
+                        atr_map[i], b5_map[i], b20_map[i], b40_map[i],
+                        (hi60_map[i] - c5[i]) / max(atr_map[i], 1e-9)]
+            if self._use_trend:
+                base = base + [ret1h_map[i] if np.isfinite(ret1h_map[i]) else 0.0,
+                               ret4h_map[i] if np.isfinite(ret4h_map[i]) else 0.0]
+            return base
 
         def ne(i, side):
             """自然出场收益 bp (回中轨限价 / MAXK 超时), 返回 (k, bp)。"""
@@ -237,15 +284,24 @@ class BBMLReversion:
         env = dict(c5=c5, h5=h5, l5=l5, v5=v5, n5=n5, ts5=ts5,
                    mid_map=mid_map, sd_map=sd_map, atr_map=atr_map,
                    vol_ma_map=vol_ma_map, b5_map=b5_map, b20_map=b20_map,
-                   ret5_map=ret5_map, dev=dev, in_long=seg_l > 0,
+                   ret5_map=ret5_map, ret1h_map=ret1h_map, ret4h_map=ret4h_map,
+                   dev=dev, in_long=seg_l > 0,
                    in_short=seg_s > 0, rll=rll, rls=rls, ef=ef, ne=ne)
         return env
 
     # ── 训练 ──────────────────────────────────────────────────
-    def fit(self, df5):
-        """训练入场器(双向) + 出场器。df5: 5M DataFrame。"""
-        df5, df15 = self._prep(df5)
-        env = self._prepare(df5, df15)
+    def fit(self, df5, df_1h=None, df_4h=None, use_trend=None):
+        """训练入场器(双向) + 出场器。df5: 5M DataFrame。
+
+        df_1h/df_4h (可选): 提供则入场器含趋势特征 (ret1h/ret4h, 12 特征);
+        不提供则 10 特征 (v1.0 兼容)。use_trend 可强制开关 (默认自动)。
+        """
+        df5, df15, df1h, df4h = self._prep(df5, df_1h, df_4h)
+        env = self._prepare(df5, df15, df1h, df4h)
+        if use_trend is None:
+            self._use_trend = bool(self._trend_avail)
+        else:
+            self._use_trend = bool(use_trend)
         years = np.array([ts.year for ts in env["ts5"]])
         n5 = env["n5"]
         entry_models = {}
@@ -314,19 +370,29 @@ class BBMLReversion:
         self.entry_models = entry_models
         self._env = env
         self._years = years
+        self.entry_fdim = BASE_ENTRY_F + (TREND_F if self._use_trend else 0)
         return self
 
     # ── 信号生成 / 回测 ───────────────────────────────────────
-    def run(self, df5, entry_models=None, exit_model=None, cost=ATR_COST):
+    def run(self, df5, df_1h=None, df_4h=None, entry_models=None,
+            exit_model=None, cost=ATR_COST):
         """在 df5 上生成交易 (在线规则), 返回 DataFrame 含:
         entry_time/exit_time/side/entry_price/exit_price/net_bp/hold_k。
-        用 self 模型或传入的冻结模型。"""
+        用 self 模型或传入的冻结模型。df_1h/df_4h 可选 (趋势特征)。"""
         em = entry_models if entry_models is not None else self.entry_models
         xm = exit_model if exit_model is not None else self.exit_model
         if em is None or xm is None:
             raise ValueError("模型未训练: 先 fit() 或传冻结模型")
-        df5, df15 = self._prep(df5)
-        env = self._prepare(df5, df15)
+        # 依据入场模型系数长度自动判定特征维度 (兼容 v1.0 10特征 / v1.1 12特征)
+        coef_len = len(em[1][0])
+        if coef_len == BASE_ENTRY_F + 1:
+            self._use_trend = False
+        elif coef_len == FULL_ENTRY_F + 1:
+            self._use_trend = True
+        else:
+            raise ValueError(f"未知入场器系数维度 {coef_len}")
+        df5, df15, df1h, df4h = self._prep(df5, df_1h, df_4h)
+        env = self._prepare(df5, df15, df1h, df4h)
         years = np.array([ts.year for ts in env["ts5"]])
         n5 = env["n5"]
         recs = []
@@ -395,24 +461,25 @@ class BBMLReversion:
         return out
 
     # ── 信号序列 (逐 bar 期望状态, 供模拟盘跟随) ───────────────
-    def run_signals(self, df5, entry_models=None, exit_model=None):
-        """输出每根 5M bar 的期望持仓状态 (1/0/-1) — 模拟盘跟随
+    def run_signals(self, df5, df_1h=None, df_4h=None,
+                    entry_models=None, exit_model=None):
+        """输出每根 5M bar 期望持仓状态 (1/0/-1) — 模拟盘跟随 (v1.1 适配)
 
-        与 run() 同口径 (单仓, 每段一笔, 出场器/触及中轨/超时), 但按时间
-        推进返回逐 bar 状态: 1=应持多, -1=应持空, 0=空仓。
-        模拟盘: 状态变化即触发开/平仓 (状态→非0 开仓, →0 平仓, 翻转反向)。
+        与 run() 同口径 (单仓/每段一笔/出场器/触及中轨/超时), 按时间推进
+        输出逐 bar 状态。df_1h/df_4h 可选 (趋势特征, 依模型维度自动)。
         """
         em = entry_models if entry_models is not None else self.entry_models
         xm = exit_model if exit_model is not None else self.exit_model
         if em is None or xm is None:
             raise ValueError("模型未训练: 先 fit() 或传冻结模型")
-        df5, df15 = self._prep(df5)
-        env = self._prepare(df5, df15)
+        coef_len = len(em[1][0])
+        self._use_trend = (coef_len == FULL_ENTRY_F + 1)
+        df5, df15, df1h, df4h = self._prep(df5, df_1h, df_4h)
+        env = self._prepare(df5, df15, df1h, df4h)
         n5 = env["n5"]
         in_long = env["in_long"]
         in_short = env["in_short"]
-        state = np.zeros(n5, int)   # 期望持仓: 1/-1/0
-        # 持仓扫描用的事件模拟 (多空独立, 与 run 同规则)
+        state = np.zeros(n5, int)
         for side in (1, -1):
             coef, thr = em[side]
             inz = in_long if side == 1 else in_short
@@ -421,7 +488,6 @@ class BBMLReversion:
                 if not inz[i]:
                     i += 1
                     continue
-                # 找入场
                 entered = None
                 while i < n5 - 200 and inz[i]:
                     f = env["ef"](i, side)
@@ -433,7 +499,6 @@ class BBMLReversion:
                     i += 1
                 if entered is None:
                     continue
-                # 持仓期: 从入场 bar 起状态=side, 直到出场
                 entry = env["c5"][entered]
                 k_nat, r_nat = env["ne"](entered, side)
                 peak = 0.0
@@ -459,17 +524,11 @@ class BBMLReversion:
                             if _ols_predict(xm, [f])[0] > EXIT_TH:
                                 exit_k = k
                                 break
-                # 状态: entered..entered+exit_k 之间持 side
-                state[entered] = side
-                # 入场 bar 到出场前一根 (出场 bar 用 next 5M 反映)
                 e_end = min(entered + exit_k, n5 - 1)
                 state[entered: e_end + 1] = side
-                # 若出场在 e_end (该 bar 出场), 状态到 e_end 结束
-                # 跳到段外 (每段一笔)
                 i = e_end + 1
                 while i < n5 - 200 and inz[i]:
                     i += 1
-        # 多空可能重叠? 每段一笔保证不重叠 (不同段)
         return pd.Series(state, index=df5.index, name="state")
 
 
