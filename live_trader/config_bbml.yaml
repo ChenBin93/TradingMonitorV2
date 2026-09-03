@@ -1,0 +1,12 @@
+# BBML Reversion 策略 paper 配置
+symbol:
+  name: BTC/USDT:USDT
+  timeframe: 5m
+
+paper:
+  initial_equity: 100.0
+  fee_rate: 0.0004     # 4bp 往返 (与回测一致)
+
+state_dir: live_trader/state_bbml
+health:
+  port: 8095
